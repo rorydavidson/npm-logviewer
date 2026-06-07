@@ -33,8 +33,13 @@ COPY --from=web /web/dist ./web
 # State directory for our own parsed-log database (mount a volume here).
 RUN mkdir -p /state && chown -R node:node /app /state
 
-USER node
+# Entrypoint runs as root only to fix the mounted volume's ownership, then drops
+# to the unprivileged `node` user via runuser before starting the app.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 8090
 
 # node:sqlite is built in; no native modules to compile.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

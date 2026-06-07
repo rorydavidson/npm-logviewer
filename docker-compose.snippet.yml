@@ -24,6 +24,10 @@ services:
       BACKFILL_DAYS: 14              # how much history to index on first boot
       SECURE_COOKIE: "true"          # set true when served over HTTPS via NPM
       TZ: ${TZ:-UTC}
+      # Runs as uid/gid 1000 by default. If you hit "unable to open database
+      # file" or cannot read /data, set these to 0 (root) to match NPM:
+      # PUID: 0
+      # PGID: 0
     volumes:
       - ./data:/data:ro              # SAME source as NPM's /data mount
       - logviewer-state:/state       # our own writable DB lives here

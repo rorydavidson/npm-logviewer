@@ -76,6 +76,16 @@ All via environment variables:
 | `SESSION_TTL` | `43200` | Session lifetime in seconds (12h). |
 | `SECURE_COOKIE` | `false` | Set `true` when served over HTTPS. |
 | `PORT` | `8090` | HTTP port. |
+| `PUID` / `PGID` | `1000` | User the app runs as. Set both to `0` if NPM's `/data` files are only readable by root, or if you see "unable to open database file". |
+
+### Troubleshooting
+
+**`unable to open database file` on startup** — the `/state` volume is not writable
+by the app's user. The entrypoint chowns it automatically; if it persists (e.g. a
+bind mount with locked-down ownership), set `PUID=0` and `PGID=0` in compose.
+
+**Empty dashboard / cannot read logs** — the app's user cannot read NPM's `/data`.
+NPM runs as root, so its files may be root-only. Set `PUID=0` `PGID=0` to match.
 
 ## Development
 
