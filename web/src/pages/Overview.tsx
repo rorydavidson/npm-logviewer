@@ -29,7 +29,13 @@ const CLASS_COLOURS = {
   class5: "#ef4444",
 } as const;
 
-export default function Overview({ filters }: { filters: Filters }) {
+export default function Overview({
+  filters,
+  setFilters,
+}: {
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+}) {
   const { data, loading, error } = useFetch<OverviewData>(
     () => api.overview(filters),
     [filters],
@@ -40,6 +46,12 @@ export default function Overview({ filters }: { filters: Filters }) {
   if (!data) return null;
 
   const s = data.summary;
+  const hostFilterActive = filters.hostId !== "all";
+  const hostLabel =
+    filters.hostId === "fallback"
+      ? "Fallback / default"
+      : (data.perHost.find((h) => String(h.hostId) === filters.hostId)?.label ??
+        `Host ${filters.hostId}`);
   const chartData = data.timeseries.map((p) => ({
     ...p,
     label: shortTime(p.bucket, data.bucketMs),
@@ -56,6 +68,24 @@ export default function Overview({ filters }: { filters: Filters }) {
 
   return (
     <div className="space-y-4">
+      {/* Active host filter tag */}
+      {hostFilterActive && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Showing</span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 text-sm font-medium text-blue-300">
+            {hostLabel}
+            <button
+              onClick={() => setFilters({ ...filters, hostId: "all" })}
+              className="text-blue-400 hover:text-white"
+              title="Clear host filter"
+              aria-label="Clear host filter"
+            >
+              ✕
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <Kpi label="Requests" value={num(s.requests)} />

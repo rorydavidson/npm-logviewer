@@ -66,11 +66,17 @@ export default function App() {
           />
         }
       >
-        <Route path="/" element={<Overview filters={filters} />} />
+        <Route
+          path="/"
+          element={<Overview filters={filters} setFilters={setFilters} />}
+        />
         <Route path="/logs" element={<Logs filters={filters} />} />
         <Route path="/errors" element={<Errors filters={filters} />} />
         <Route path="/live" element={<Live />} />
-        <Route path="/hosts" element={<Hosts filters={filters} />} />
+        <Route
+          path="/hosts"
+          element={<Hosts filters={filters} setFilters={setFilters} />}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

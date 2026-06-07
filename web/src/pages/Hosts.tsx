@@ -1,14 +1,27 @@
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
 import { ErrorBox, Panel, Spinner } from "../components/ui";
 import { bytes, num, pct } from "../lib/format";
 import type { Filters, Overview } from "../lib/types";
 
-export default function Hosts({ filters }: { filters: Filters }) {
+export default function Hosts({
+  filters,
+  setFilters,
+}: {
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+}) {
+  const navigate = useNavigate();
   const { data, loading, error } = useFetch<Overview>(
     () => api.overview(filters),
     [filters],
   );
+
+  const openHost = (hostId: number | null) => {
+    setFilters({ ...filters, hostId: hostId === null ? "fallback" : String(hostId) });
+    navigate("/");
+  };
 
   if (loading) return <Spinner />;
   if (error) return <ErrorBox message={error} />;
@@ -34,8 +47,13 @@ export default function Hosts({ filters }: { filters: Filters }) {
           </thead>
           <tbody className="divide-y divide-gray-800/60">
             {hosts.map((h) => (
-              <tr key={String(h.hostId)} className="hover:bg-gray-800/30">
-                <td className="py-2 pr-3 text-gray-200">{h.label}</td>
+              <tr
+                key={String(h.hostId)}
+                onClick={() => openHost(h.hostId)}
+                className="cursor-pointer hover:bg-gray-800/30"
+                title={`View dashboard for ${h.label}`}
+              >
+                <td className="py-2 pr-3 font-medium text-blue-400">{h.label}</td>
                 <td className="py-2 pr-3 text-right tabular-nums text-gray-300">
                   {num(h.requests)}
                 </td>
