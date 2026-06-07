@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyIp } from "../src/ingest/networks.js";
+import { classifyIp, ipMatchesAny } from "../src/ingest/networks.js";
 import { lookupGeo } from "../src/ingest/geo.js";
 
 describe("classifyIp", () => {
@@ -27,6 +27,20 @@ describe("classifyIp", () => {
   it("does not confuse a near-miss with a Cloudflare block", () => {
     // 172.63.x is just below Cloudflare's 172.64.0.0/13.
     expect(classifyIp("172.63.255.255")).toBe("public");
+  });
+});
+
+describe("ipMatchesAny", () => {
+  it("matches exact IPs", () => {
+    expect(ipMatchesAny("8.8.8.8", ["1.1.1.1", "8.8.8.8"])).toBe(true);
+    expect(ipMatchesAny("8.8.8.8", ["1.1.1.1"])).toBe(false);
+  });
+  it("matches CIDR ranges", () => {
+    expect(ipMatchesAny("10.20.30.40", ["10.20.30.0/24"])).toBe(true);
+    expect(ipMatchesAny("10.20.31.40", ["10.20.30.0/24"])).toBe(false);
+  });
+  it("ignores blanks", () => {
+    expect(ipMatchesAny("8.8.8.8", ["", "  "])).toBe(false);
   });
 });
 

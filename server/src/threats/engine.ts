@@ -1,7 +1,8 @@
 import type { DB } from "../store/db.js";
 import type { Settings } from "../store/settings.js";
 import type { Mailer } from "./mailer.js";
-import { DETECTORS, DETECTOR_BY_ID, defaultConfig } from "./detectors.js";
+import { DETECTORS, defaultConfig } from "./detectors.js";
+import { ipMatchesAny } from "../ingest/networks.js";
 import {
   SEVERITY_RANK,
   type Finding,
@@ -77,6 +78,10 @@ export class ThreatEngine {
     const cfg = this.getConfig();
     const to = Date.now();
     const from = to - cfg.windowMinutes * 60_000;
+    const exceptions = cfg.exceptions ?? [];
+
+    // Drop any existing findings for now-excepted subjects.
+    if (exceptions.length) this.#purgeExcepted(exceptions);
 
     const alertable: Finding[] = [];
 
@@ -91,6 +96,10 @@ export class ThreatEngine {
         continue;
       }
       for (const raw of raws) {
+        // Skip trusted IPs/ranges (e.g. the operator's own address).
+        if (raw.subject !== "global" && ipMatchesAny(raw.subject, exceptions)) {
+          continue;
+        }
         this.#upsert.run({
           rule: detector.id,
           subject: raw.subject,
@@ -220,6 +229,17 @@ export class ThreatEngine {
 
   clear(): void {
     this.#db.prepare(`DELETE FROM threat_finding`).run();
+  }
+
+  /** Remove findings whose subject matches an exception (exact IP or CIDR). */
+  #purgeExcepted(exceptions: string[]): void {
+    const subjects = this.#db
+      .prepare(`SELECT DISTINCT subject FROM threat_finding`)
+      .all() as unknown as Array<{ subject: string }>;
+    const del = this.#db.prepare(`DELETE FROM threat_finding WHERE subject = ?`);
+    for (const { subject } of subjects) {
+      if (subject !== "global" && ipMatchesAny(subject, exceptions)) del.run(subject);
+    }
   }
 }
 

@@ -24,6 +24,8 @@ export interface ThreatConfig {
   alertEmail: string;
   alertMinSeverity: Severity;
   cooldownMinutes: number;
+  /** IPs or CIDR ranges to ignore in all detectors (e.g. your own address). */
+  exceptions: string[];
   rules: Record<string, RuleConfig>;
 }
 

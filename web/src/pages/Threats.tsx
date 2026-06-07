@@ -73,6 +73,15 @@ export default function Threats() {
     const r = await api.testThreatEmail();
     flash(r.ok ? "Test email sent" : `Email failed: ${r.error ?? "unknown"}`);
   };
+  const trustIp = async (ip: string) => {
+    if (!config) return;
+    if (config.exceptions.includes(ip)) return;
+    const next = { ...config, exceptions: [...config.exceptions, ip] };
+    setConfig(next);
+    await api.saveThreatConfig(next);
+    flash(`${ip} added to exceptions`);
+    setTimeout(() => void reload(), 400);
+  };
 
   if (loading) return <Spinner />;
   if (error) return <ErrorBox message={error} />;
@@ -165,6 +174,15 @@ export default function Threats() {
                 <span className="ml-auto text-xs text-gray-500">
                   last seen {time(f.lastTs)}
                 </span>
+                {f.subject !== "global" && (
+                  <button
+                    onClick={() => trustIp(f.subject)}
+                    title="Add this IP to the exception list"
+                    className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-800"
+                  >
+                    Trust IP
+                  </button>
+                )}
                 <button
                   onClick={() => ack(f.id)}
                   className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-800"
@@ -290,6 +308,27 @@ function SettingsPanel({
           Send test email
         </button>
       </div>
+
+      {/* Exception list */}
+      <label className="mb-4 block text-xs text-gray-400">
+        Trusted IPs / ranges (ignored by all rules) — one per line, exact IP or CIDR
+        <textarea
+          value={config.exceptions.join("\n")}
+          onChange={(e) =>
+            onChange({
+              ...config,
+              exceptions: e.target.value
+                .split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+          rows={3}
+          spellCheck={false}
+          placeholder={"e.g. 203.0.113.5\n10.0.0.0/24"}
+          className="mt-1 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
+        />
+      </label>
 
       {/* Per-rule settings */}
       <div className="space-y-3">

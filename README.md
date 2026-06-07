@@ -164,6 +164,8 @@ The **Threats** tab runs a set of detectors over a rolling window (default 10 mi
 
 Everything is editable in the UI: enable/disable each rule, change its severity, adjust thresholds, and edit the match patterns for the pattern-based rules. Settings persist in the state database.
 
+**Exceptions:** add trusted IPs or CIDR ranges (e.g. your own address) so they are ignored by every rule. Use the **Trust IP** button on any finding, or edit the list in Settings. Existing findings for a newly trusted address are removed on the next cycle.
+
 ### Email alerts (Resend)
 
 1. Set `RESEND_API_KEY` (and optionally `ALERT_FROM`) in the container environment.

@@ -145,6 +145,35 @@ describe("ThreatEngine", () => {
     expect(engine.listFindings({ includeAcked: true }).length).toBeGreaterThan(0);
   });
 
+  it("ignores findings from excepted IPs and purges existing ones", async () => {
+    store.insertAccessBatch(
+      Array.from({ length: 40 }, (_, i) =>
+        entry({ status: 404, uri: `/m-${i}`, client: "203.0.113.50" }),
+      ),
+    );
+    await engine.evaluate();
+    expect(engine.listFindings({}).length).toBeGreaterThan(0);
+
+    const cfg = engine.getConfig();
+    cfg.exceptions = ["203.0.113.50"];
+    engine.setConfig(cfg);
+    await engine.evaluate();
+    expect(engine.listFindings({})).toHaveLength(0);
+  });
+
+  it("supports CIDR ranges in exceptions", async () => {
+    store.insertAccessBatch(
+      Array.from({ length: 40 }, (_, i) =>
+        entry({ status: 404, uri: `/m-${i}`, client: "10.20.30.40" }),
+      ),
+    );
+    const cfg = engine.getConfig();
+    cfg.exceptions = ["10.20.30.0/24"];
+    engine.setConfig(cfg);
+    await engine.evaluate();
+    expect(engine.listFindings({})).toHaveLength(0);
+  });
+
   it("merges saved config over defaults", () => {
     const cfg = engine.getConfig();
     cfg.rules.scanner404!.threshold = 999;

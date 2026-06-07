@@ -74,6 +74,25 @@ function isPrivateV4(long: number): boolean {
   );
 }
 
+/**
+ * True if `ip` matches any entry in a list of exact IPs or CIDR ranges.
+ * Non-IPv4 entries are compared as exact strings (covers IPv6 literals).
+ */
+export function ipMatchesAny(ip: string, entries: string[]): boolean {
+  if (!ip) return false;
+  const long = ipv4ToLong(ip);
+  for (const raw of entries) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    if (entry === ip) return true;
+    if (long !== null && entry.includes("/")) {
+      const cidr = parseCidr(entry);
+      if (cidr && ((long & cidr.mask) >>> 0) === cidr.base) return true;
+    }
+  }
+  return false;
+}
+
 /** Classify a client IP. IPv6 is treated as private/unknown for now. */
 export function classifyIp(ip: string): IpClass {
   if (!ip || ip === "-") return "private";

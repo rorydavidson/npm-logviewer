@@ -315,6 +315,7 @@ export function defaultConfig(): import("./types.js").ThreatConfig {
     alertEmail: "",
     alertMinSeverity: "critical",
     cooldownMinutes: 30,
+    exceptions: [],
     rules,
   };
 }
