@@ -1,4 +1,5 @@
 import geoip from "geoip-lite";
+import { classifyIp } from "./networks.js";
 
 export interface GeoInfo {
   country: string | null;
@@ -14,26 +15,17 @@ const EMPTY: GeoInfo = { country: null, region: null, city: null, lat: null, lon
 const cache = new Map<string, GeoInfo>();
 const MAX_CACHE = 50_000;
 
-function isPrivate(ip: string): boolean {
-  return (
-    ip.startsWith("10.") ||
-    ip.startsWith("192.168.") ||
-    ip.startsWith("127.") ||
-    ip.startsWith("::1") ||
-    ip.startsWith("fc") ||
-    ip.startsWith("fd") ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
-    ip === "-" ||
-    ip === ""
-  );
-}
-
 /**
  * Resolve a client IP to a coarse location using the bundled GeoLite database.
  * Fully offline — no network calls, which keeps the dashboard privacy-first.
+ *
+ * Private and CDN (Cloudflare) addresses are deliberately not geolocated: when
+ * a site is proxied through Cloudflare, NPM logs the Cloudflare edge IP rather
+ * than the visitor, so any location for it would be misleading. See README for
+ * how to log the real client IP.
  */
 export function lookupGeo(ip: string): GeoInfo {
-  if (isPrivate(ip)) return EMPTY;
+  if (classifyIp(ip) !== "public") return EMPTY;
   const cached = cache.get(ip);
   if (cached) return cached;
 
