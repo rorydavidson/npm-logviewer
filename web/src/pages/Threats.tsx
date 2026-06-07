@@ -298,6 +298,19 @@ function SettingsPanel({
             className="mt-1 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 text-sm text-white"
           />
         </label>
+        <label className="text-xs text-gray-400">
+          Email only after N findings
+          <input
+            type="number"
+            min={1}
+            value={config.alertMinFindings}
+            onChange={(e) =>
+              onChange({ ...config, alertMinFindings: Number(e.target.value) })
+            }
+            title="1 = email every qualifying threat; higher = only on a concerted attack with multiple findings"
+            className="mt-1 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 text-sm text-white"
+          />
+        </label>
       </div>
       <div className="mb-4">
         <button

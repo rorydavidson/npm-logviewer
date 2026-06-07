@@ -122,6 +122,7 @@ export interface ThreatConfig {
   alertEmail: string;
   alertMinSeverity: Severity;
   cooldownMinutes: number;
+  alertMinFindings: number;
   exceptions: string[];
   rules: Record<string, RuleConfig>;
 }
@@ -169,4 +170,5 @@ export interface Filters {
   method?: string;
   search?: string;
   country?: string;
+  client?: string;
 }

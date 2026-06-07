@@ -32,6 +32,8 @@ export interface Config {
   resendApiKey: string;
   /** From address for alert emails (must be a Resend-verified sender). */
   alertFrom: string;
+  /** Public base URL of this dashboard, used for links in alert emails. */
+  siteUrl: string;
   /** Trust X-Forwarded-* headers (true when behind NPM/a reverse proxy). */
   trustProxy: boolean;
   /** Max failed logins per IP within the window before throttling. */
@@ -75,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     secureCookie: envBool("SECURE_COOKIE", false),
     resendApiKey: env.RESEND_API_KEY ?? "",
     alertFrom: env.ALERT_FROM ?? "ProxyLogs <onboarding@resend.dev>",
+    siteUrl: (env.SITE_URL ?? "").replace(/\/+$/, ""),
     trustProxy: envBool("TRUST_PROXY", true),
     loginMaxAttempts: envInt("LOGIN_MAX_ATTEMPTS", 10),
     loginWindowMinutes: envInt("LOGIN_WINDOW_MINUTES", 15),

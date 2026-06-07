@@ -24,6 +24,8 @@ export interface ThreatConfig {
   alertEmail: string;
   alertMinSeverity: Severity;
   cooldownMinutes: number;
+  /** Minimum number of qualifying findings in a cycle before an email is sent. */
+  alertMinFindings: number;
   /** IPs or CIDR ranges to ignore in all detectors (e.g. your own address). */
   exceptions: string[];
   rules: Record<string, RuleConfig>;

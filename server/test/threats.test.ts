@@ -183,3 +183,84 @@ describe("ThreatEngine", () => {
     expect(engine.getConfig().rules.injection).toBeDefined();
   });
 });
+
+describe("ThreatEngine email alerts", () => {
+  interface Sent {
+    to: string;
+    subject: string;
+    text: string;
+  }
+
+  function setup(siteUrl: string) {
+    const store = new Store(":memory:");
+    const settings = new Settings(store.db);
+    const sent: Sent[] = [];
+    const fakeMailer = {
+      configured: true,
+      send: async (to: string, subject: string, text: string) => {
+        sent.push({ to, subject, text });
+        return { ok: true };
+      },
+    } as unknown as Mailer;
+    const engine = new ThreatEngine(store.db, settings, fakeMailer, undefined, siteUrl);
+    return { store, settings, engine, sent };
+  }
+
+  function scansFromIps(ips: string[]): AccessEntry[] {
+    return ips.flatMap((ip) =>
+      Array.from({ length: 35 }, (_, i) =>
+        entry({ status: 404, uri: `/m-${ip}-${i}`, client: ip }),
+      ),
+    );
+  }
+
+  it("sends when findings reach alertMinFindings, with deep links", async () => {
+    const { store, engine, sent } = setup("https://logs.example.com/");
+    store.insertAccessBatch(scansFromIps(["198.51.100.30", "198.51.100.31"]));
+
+    const cfg = engine.getConfig();
+    cfg.alertEmail = "ops@example.com";
+    cfg.alertMinSeverity = "high"; // scanner404 is "high"
+    cfg.alertMinFindings = 2;
+    engine.setConfig(cfg);
+
+    await engine.evaluate();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toBe("ops@example.com");
+    expect(sent[0]?.text).toContain("https://logs.example.com/threats");
+    expect(sent[0]?.text).toContain("https://logs.example.com/logs?client=198.51.100.30");
+    store.close();
+  });
+
+  it("does not send when below alertMinFindings", async () => {
+    const { store, engine, sent } = setup("https://logs.example.com");
+    store.insertAccessBatch(scansFromIps(["198.51.100.40"])); // only one finding
+
+    const cfg = engine.getConfig();
+    cfg.alertEmail = "ops@example.com";
+    cfg.alertMinSeverity = "high";
+    cfg.alertMinFindings = 2; // need two, have one
+    engine.setConfig(cfg);
+
+    await engine.evaluate();
+    expect(sent).toHaveLength(0);
+    store.close();
+  });
+
+  it("respects the per-rule cooldown", async () => {
+    const { store, engine, sent } = setup("https://logs.example.com");
+    store.insertAccessBatch(scansFromIps(["198.51.100.50"]));
+
+    const cfg = engine.getConfig();
+    cfg.alertEmail = "ops@example.com";
+    cfg.alertMinSeverity = "high";
+    cfg.alertMinFindings = 1;
+    cfg.cooldownMinutes = 60;
+    engine.setConfig(cfg);
+
+    await engine.evaluate();
+    await engine.evaluate(); // immediate re-run is within cooldown
+    expect(sent).toHaveLength(1);
+    store.close();
+  });
+});

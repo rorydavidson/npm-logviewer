@@ -19,17 +19,20 @@ export class ThreatEngine {
   #upsert;
   #timer: NodeJS.Timeout | null = null;
   #onLog: (msg: string, extra?: unknown) => void;
+  #siteUrl: string;
 
   constructor(
     db: DB,
     settings: Settings,
     mailer: Mailer,
     onLog: (msg: string, extra?: unknown) => void = () => {},
+    siteUrl = "",
   ) {
     this.#db = db;
     this.#settings = settings;
     this.#mailer = mailer;
     this.#onLog = onLog;
+    this.#siteUrl = siteUrl.replace(/\/+$/, "");
     this.#upsert = db.prepare(`
       INSERT INTO threat_finding
         (rule, subject, severity, title, detail, host_label, sample, count, first_ts, last_ts, acknowledged)
@@ -150,12 +153,14 @@ export class ThreatEngine {
         rulesReady.add(f.rule);
       }
     }
-    if (toReport.length === 0) return;
+    // Require enough findings before alerting — lets the user demand a
+    // concerted attack (multiple findings) rather than a single hit.
+    if (toReport.length < cfg.alertMinFindings) return;
 
     const subject = `[ProxyLogs] ${toReport.length} security finding${
       toReport.length === 1 ? "" : "s"
     } (${highest(toReport)})`;
-    const body = renderEmail(cfg, toReport);
+    const body = renderEmail(cfg, toReport, this.#siteUrl);
 
     const result = await this.#mailer.send(cfg.alertEmail, subject, body);
     if (result.ok) {
@@ -249,7 +254,7 @@ function highest(findings: Finding[]): string {
     .sort((a, b) => SEVERITY_RANK[b] - SEVERITY_RANK[a])[0] as string;
 }
 
-function renderEmail(cfg: ThreatConfig, findings: Finding[]): string {
+function renderEmail(cfg: ThreatConfig, findings: Finding[], siteUrl: string): string {
   const lines = [
     "ProxyLogs detected suspicious activity against your Nginx Proxy Manager hosts.",
     `Window: last ${cfg.windowMinutes} minutes.`,
@@ -260,8 +265,24 @@ function renderEmail(cfg: ThreatConfig, findings: Finding[]): string {
     lines.push(`    subject: ${f.subject}`);
     lines.push(`    ${f.detail}`);
     if (f.sample) lines.push(`    sample: ${f.sample}`);
+    if (siteUrl && f.subject !== "global") {
+      // Deep link to the access logs filtered to this client over the window.
+      const from = f.firstTs - cfg.windowMinutes * 60_000;
+      const q = new URLSearchParams({
+        client: f.subject,
+        from: String(from),
+        to: String(f.lastTs),
+      });
+      lines.push(`    investigate: ${siteUrl}/logs?${q.toString()}`);
+    }
     lines.push("");
   }
-  lines.push("Open the Threats tab in ProxyLogs for the full picture.");
+  if (siteUrl) {
+    lines.push(`Open the Threats tab: ${siteUrl}/threats`);
+  } else {
+    lines.push(
+      "Open the Threats tab in ProxyLogs for the full picture. (Set SITE_URL to get direct links here.)",
+    );
+  }
   return lines.join("\n");
 }

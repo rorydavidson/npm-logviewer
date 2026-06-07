@@ -48,6 +48,7 @@ export function filterParams(f: Filters): string {
   if (f.method) p.set("method", f.method);
   if (f.search) p.set("search", f.search);
   if (f.country) p.set("country", f.country);
+  if (f.client) p.set("client", f.client);
   return p.toString();
 }
 

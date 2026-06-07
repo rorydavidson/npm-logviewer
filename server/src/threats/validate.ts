@@ -57,6 +57,7 @@ export function sanitizeThreatConfig(input: unknown): ThreatConfig {
   return {
     windowMinutes: clampInt(raw.windowMinutes, 1, 1440, base.windowMinutes),
     cooldownMinutes: clampInt(raw.cooldownMinutes, 0, 10080, base.cooldownMinutes),
+    alertMinFindings: clampInt(raw.alertMinFindings, 1, 1000, base.alertMinFindings),
     alertMinSeverity: asSeverity(raw.alertMinSeverity, base.alertMinSeverity),
     alertEmail:
       typeof raw.alertEmail === "string" ? raw.alertEmail.trim().slice(0, 320) : "",

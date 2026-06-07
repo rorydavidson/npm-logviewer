@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
 import { ErrorBox, Panel, Spinner, StatusBadge } from "../components/ui";
@@ -9,13 +10,36 @@ const PAGE = 100;
 
 export default function Logs({ filters }: { filters: Filters }) {
   const [offset, setOffset] = useState(0);
+  const [params, setParams] = useSearchParams();
 
-  // Reset to the first page whenever the filters change.
-  useEffect(() => setOffset(0), [filters]);
+  // Deep links (e.g. from alert emails) can pre-filter by client and time
+  // range via the URL: /logs?client=1.2.3.4&from=...&to=...
+  const clientParam = params.get("client") ?? undefined;
+  const fromParam = params.get("from");
+  const toParam = params.get("to");
+
+  const effective: Filters = useMemo(() => {
+    const f = { ...filters };
+    if (clientParam) f.client = clientParam;
+    if (fromParam) f.from = Number(fromParam);
+    if (toParam) f.to = Number(toParam);
+    return f;
+  }, [filters, clientParam, fromParam, toParam]);
+
+  const clearDeepLink = () => {
+    const next = new URLSearchParams(params);
+    next.delete("client");
+    next.delete("from");
+    next.delete("to");
+    setParams(next, { replace: true });
+  };
+
+  // Reset to the first page whenever the effective filters change.
+  useEffect(() => setOffset(0), [effective]);
 
   const { data, loading, error } = useFetch(
-    () => api.logs(filters, PAGE, offset),
-    [filters, offset],
+    () => api.logs(effective, PAGE, offset),
+    [effective, offset],
   );
 
   if (loading && !data) return <Spinner />;
@@ -49,6 +73,20 @@ export default function Logs({ filters }: { filters: Filters }) {
         </div>
       }
     >
+      {clientParam && (
+        <div className="mb-3">
+          <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 text-sm font-medium text-blue-300">
+            client {clientParam}
+            <button
+              onClick={clearDeepLink}
+              className="text-blue-400 hover:text-white"
+              aria-label="Clear client filter"
+            >
+              ✕
+            </button>
+          </span>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-xs uppercase text-gray-500">

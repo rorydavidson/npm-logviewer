@@ -25,6 +25,7 @@ services:
       SECURE_COOKIE: "true"          # set true when served over HTTPS via NPM
       RESEND_API_KEY: ${RESEND_API_KEY:-}   # optional: enables threat email alerts
       ALERT_FROM: ${ALERT_FROM:-ProxyLogs <onboarding@resend.dev>}
+      SITE_URL: ${SITE_URL:-}               # e.g. https://logs.example.com (for email links)
       TZ: ${TZ:-UTC}
       # Runs as uid/gid 1000 by default. If you hit "unable to open database
       # file" or cannot read /data, set these to 0 (root) to match NPM:

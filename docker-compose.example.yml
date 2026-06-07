@@ -29,6 +29,7 @@ services:
       SECURE_COOKIE: "false"   # true once behind HTTPS
       RESEND_API_KEY: ${RESEND_API_KEY:-}   # optional: threat email alerts
       ALERT_FROM: ${ALERT_FROM:-ProxyLogs <onboarding@resend.dev>}
+      SITE_URL: ${SITE_URL:-}               # e.g. https://logs.example.com (for email links)
       TZ: ${TZ:-UTC}
     volumes:
       - ./data:/data:ro        # shares NPM's logs + database, read-only

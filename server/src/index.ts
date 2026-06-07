@@ -34,8 +34,12 @@ async function main(): Promise<void> {
 
   const settings = new Settings(store.db);
   const mailer = new Mailer({ apiKey: config.resendApiKey, from: config.alertFrom });
-  const engine = new ThreatEngine(store.db, settings, mailer, (msg, extra) =>
-    app.log.info({ ...(extra as object) }, msg),
+  const engine = new ThreatEngine(
+    store.db,
+    settings,
+    mailer,
+    (msg, extra) => app.log.info({ ...(extra as object) }, msg),
+    config.siteUrl,
   );
 
   const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer };

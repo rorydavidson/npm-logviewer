@@ -81,6 +81,7 @@ All via environment variables:
 | `PUID` / `PGID` | `1000` | User the app runs as. Set both to `0` if NPM's `/data` files are only readable by root, or if you see "unable to open database file". |
 | `RESEND_API_KEY` | _(empty)_ | Resend API key. When set, the Threats tab can email alerts. Empty disables sending. |
 | `ALERT_FROM` | `ProxyLogs <onboarding@resend.dev>` | From address for alert emails. Must be a sender verified in your Resend account (the `onboarding@resend.dev` default only delivers to your own Resend login email). |
+| `SITE_URL` | _(empty)_ | Public base URL of the dashboard (e.g. `https://logs.example.com`). Used to add clickable deep links in alert emails. |
 | `TRUST_PROXY` | `true` | Trust `X-Forwarded-For` so the login rate limiter sees the real client IP. Keep `true` behind NPM; set `false` only if the app is exposed directly with no proxy. |
 | `LOGIN_MAX_ATTEMPTS` | `10` | Failed logins per IP allowed within the window before throttling. |
 | `LOGIN_WINDOW_MINUTES` | `15` | Login throttle window. |
@@ -173,10 +174,15 @@ Everything is editable in the UI: enable/disable each rule, change its severity,
 ### Email alerts (Resend)
 
 1. Set `RESEND_API_KEY` (and optionally `ALERT_FROM`) in the container environment.
-2. In the Threats tab → **Settings**, set the alert email address, the minimum severity to alert on, and a cooldown (to avoid repeat spam).
-3. Use **Send test email** to confirm delivery.
+2. Set `SITE_URL` so the emails can include clickable links back to the dashboard.
+3. In the Threats tab → **Settings**, set the alert email address, the minimum severity to alert on, a cooldown (to avoid repeat spam), and **how many findings** must appear in a cycle before an email is sent.
+4. Use **Send test email** to confirm delivery.
 
 When findings reach the chosen severity, ProxyLogs sends one bundled email per cycle (respecting the per-rule cooldown) via the Resend HTTP API. No alerting happens until both `RESEND_API_KEY` and an alert email are set.
+
+**Concerted-attack threshold:** "Email only after N findings" lets you avoid noise from a single stray hit. Set it to `1` to be told about every qualifying threat, or higher to only be emailed when several findings fire together (a coordinated probe). 
+
+**Deep links:** when `SITE_URL` is set, each email links to the Threats tab and, per finding, to the access logs pre-filtered to the offending IP and time window, so you can jump straight to the entry in question.
 
 ## Security
 
