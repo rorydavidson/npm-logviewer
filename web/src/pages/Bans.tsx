@@ -7,6 +7,7 @@ import type { Ban } from "../lib/types";
 export default function Bans() {
   const [bans, setBans] = useState<Ban[]>([]);
   const [canReload, setCanReload] = useState(false);
+  const [canWrite, setCanWrite] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newIp, setNewIp] = useState("");
@@ -17,6 +18,7 @@ export default function Bans() {
       const r = await api.bans();
       setBans(r.bans);
       setCanReload(r.canReload);
+      setCanWrite(r.canWrite);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -63,7 +65,17 @@ export default function Bans() {
         </div>
       )}
 
-      {!canReload && (
+      {!canWrite && (
+        <div className="rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-2 text-sm text-red-300">
+          Can't write the nginx deny file at the custom-config dir (permission
+          denied). Bans are recorded but not enforced. Run the container as root
+          (<code className="mx-1">PUID=0 PGID=0</code>) or fix ownership of the
+          mounted <code className="mx-1">nginx/custom</code> directory, then they
+          will apply.
+        </div>
+      )}
+
+      {canWrite && !canReload && (
         <div className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-4 py-2 text-sm text-amber-300">
           Bans are written to the nginx deny file, but automatic reload is off.
           They apply on NPM's next reload/restart. To apply instantly, set

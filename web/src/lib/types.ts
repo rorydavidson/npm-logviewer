@@ -140,6 +140,7 @@ export interface Ban {
 
 export interface BansResponse {
   canReload: boolean;
+  canWrite: boolean;
   bans: Ban[];
 }
 

@@ -34,6 +34,10 @@ export class BanService {
     return this.#enforcer.canReload;
   }
 
+  get canWrite(): boolean {
+    return this.#enforcer.canWrite;
+  }
+
   list(): Ban[] {
     return this.#store.list();
   }

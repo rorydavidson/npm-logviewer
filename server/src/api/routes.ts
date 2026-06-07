@@ -263,6 +263,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   // --- ban list ------------------------------------------------------------
   app.get("/api/bans", async () => ({
     canReload: bans.canReload,
+    canWrite: bans.canWrite,
     bans: bans.list().map((b) => ({ ...b, ...geoForSubject(db, b.ip) })),
   }));
 

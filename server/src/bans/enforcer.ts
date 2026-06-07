@@ -33,6 +33,17 @@ export class BanEnforcer {
     return Boolean(this.#opts.npmContainer) && fs.existsSync(this.#opts.dockerSocket);
   }
 
+  /** Whether we can actually write the deny file (perms on the custom dir). */
+  get canWrite(): boolean {
+    try {
+      fs.mkdirSync(this.#opts.customDir, { recursive: true });
+      fs.accessSync(this.#opts.customDir, fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Write the deny file from the current list and reload if possible. */
   async sync(ips: string[]): Promise<void> {
     const { customDir, log } = this.#opts;

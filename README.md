@@ -116,6 +116,12 @@ bind mount with locked-down ownership), set `PUID=0` and `PGID=0` in compose.
 **Empty dashboard / cannot read logs** — the app's user cannot read NPM's `/data`.
 NPM runs as root, so its files may be root-only. Set `PUID=0` `PGID=0` to match.
 
+**Bans not enforced / "permission denied" writing `proxylogs-bans.conf`** — the
+app's user cannot write NPM's `nginx/custom` directory (it is root-owned). Run the
+container as root with `PUID=0` and `PGID=0` (you likely need this to read NPM's
+`/data` anyway), or fix ownership of the mounted custom directory. The Bans tab
+shows a banner when it cannot write the file.
+
 **Alert emails say "SITE_URL is not set"** — a value in `.env` is only used for
 `${...}` interpolation in compose; it is not passed into the container by itself.
 Make sure the `logviewer` service forwards it, e.g. `SITE_URL: ${SITE_URL}` (or a
