@@ -1,5 +1,6 @@
 import type {
   AccessRow,
+  CountryStat,
   ErrorRow,
   Filters,
   Meta,
@@ -55,6 +56,8 @@ export const api = {
   me: () => req<{ email: string; name: string }>("/api/me"),
   meta: () => req<Meta>("/api/meta"),
   overview: (f: Filters) => req<Overview>(`/api/overview?${filterParams(f)}`),
+  geo: (f: Filters) =>
+    req<{ countries: CountryStat[] }>(`/api/geo?${filterParams(f)}`),
   logs: (f: Filters, limit: number, offset: number) =>
     req<{ total: number; limit: number; offset: number; rows: AccessRow[] }>(
       `/api/logs?${filterParams(f)}&limit=${limit}&offset=${offset}`,

@@ -8,6 +8,7 @@ import Logs from "./pages/Logs";
 import Errors from "./pages/Errors";
 import Live from "./pages/Live";
 import Hosts from "./pages/Hosts";
+import World from "./pages/World";
 import type { Filters } from "./lib/types";
 
 type AuthState =
@@ -76,6 +77,10 @@ export default function App() {
         <Route
           path="/hosts"
           element={<Hosts filters={filters} setFilters={setFilters} />}
+        />
+        <Route
+          path="/world"
+          element={<World filters={filters} setFilters={setFilters} />}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

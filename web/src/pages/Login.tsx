@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
+import { LogoMark } from "../components/Logo";
 
 export default function Login({ onSuccess }: { onSuccess: (name: string) => void }) {
   const [email, setEmail] = useState("");
@@ -27,7 +28,15 @@ export default function Login({ onSuccess }: { onSuccess: (name: string) => void
         onSubmit={submit}
         className="w-full max-w-sm rounded-2xl border border-gray-800 bg-gray-900/60 p-8 shadow-xl"
       >
-        <h1 className="mb-1 text-xl font-semibold text-white">NPM Log Viewer</h1>
+        <div className="mb-4 flex items-center gap-3">
+          <LogoMark size={40} />
+          <div>
+            <h1 className="text-xl font-semibold text-white">
+              Proxy<span className="text-teal-400">Logs</span>
+            </h1>
+            <p className="text-xs text-gray-500">NPM log dashboard</p>
+          </div>
+        </div>
         <p className="mb-6 text-sm text-gray-400">
           Sign in with your Nginx Proxy Manager account.
         </p>

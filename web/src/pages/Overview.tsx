@@ -68,21 +68,36 @@ export default function Overview({
 
   return (
     <div className="space-y-4">
-      {/* Active host filter tag */}
-      {hostFilterActive && (
-        <div className="flex items-center gap-2">
+      {/* Active filter tags */}
+      {(hostFilterActive || filters.country) && (
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-gray-500">Showing</span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 text-sm font-medium text-blue-300">
-            {hostLabel}
-            <button
-              onClick={() => setFilters({ ...filters, hostId: "all" })}
-              className="text-blue-400 hover:text-white"
-              title="Clear host filter"
-              aria-label="Clear host filter"
-            >
-              ✕
-            </button>
-          </span>
+          {hostFilterActive && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 text-sm font-medium text-blue-300">
+              {hostLabel}
+              <button
+                onClick={() => setFilters({ ...filters, hostId: "all" })}
+                className="text-blue-400 hover:text-white"
+                title="Clear host filter"
+                aria-label="Clear host filter"
+              >
+                ✕
+              </button>
+            </span>
+          )}
+          {filters.country && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-teal-500/40 bg-teal-500/15 px-3 py-1 text-sm font-medium text-teal-300">
+              {flag(filters.country)} {countryName(filters.country)}
+              <button
+                onClick={() => setFilters({ ...filters, country: undefined })}
+                className="text-teal-400 hover:text-white"
+                title="Clear country filter"
+                aria-label="Clear country filter"
+              >
+                ✕
+              </button>
+            </span>
+          )}
         </div>
       )}
 

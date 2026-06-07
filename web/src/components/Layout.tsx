@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { Logo } from "./Logo";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
 import type { Filters, Meta } from "../lib/types";
@@ -14,6 +15,7 @@ const RANGES: { label: string; ms: number }[] = [
 const NAV = [
   { to: "/", label: "Overview", end: true },
   { to: "/hosts", label: "Hosts", end: false },
+  { to: "/world", label: "World", end: false },
   { to: "/logs", label: "Access logs", end: false },
   { to: "/errors", label: "Errors", end: false },
   { to: "/live", label: "Live tail", end: false },
@@ -42,9 +44,7 @@ export default function Layout({
     <div className="mx-auto flex min-h-full max-w-[1500px] flex-col">
       <header className="sticky top-0 z-10 border-b border-gray-800 bg-[#0b0f17]/90 backdrop-blur">
         <div className="flex items-center gap-4 px-5 py-3">
-          <div className="text-sm font-semibold tracking-wide text-white">
-            NPM<span className="text-blue-500">·</span>Logs
-          </div>
+          <Logo />
           <nav className="flex gap-1">
             {NAV.map((n) => (
               <NavLink
