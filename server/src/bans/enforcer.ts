@@ -105,12 +105,17 @@ export class BanEnforcer {
 
   /** Reload nginx in the NPM container via the Docker socket, if available. */
   async #reload(): Promise<void> {
-    const { dockerSocket, npmContainer, log } = this.#opts;
+    const { npmContainer, log } = this.#opts;
     if (!this.canReload) return;
     try {
+      const id = await this.#resolveContainer();
+      if (!id) {
+        log("ban enforce: NPM container not found", { npmContainer });
+        return;
+      }
       const exec = await this.#docker<{ Id: string }>(
         "POST",
-        `/containers/${encodeURIComponent(npmContainer)}/exec`,
+        `/containers/${encodeURIComponent(id)}/exec`,
         { AttachStdout: true, AttachStderr: true, Cmd: ["nginx", "-s", "reload"] },
       );
       await this.#docker("POST", `/exec/${exec.Id}/start`, { Detach: true, Tty: false });
@@ -118,21 +123,40 @@ export class BanEnforcer {
     } catch (err) {
       log("ban enforce: nginx reload failed", { err });
     }
-    void dockerSocket;
+  }
+
+  /**
+   * Resolve the configured value to a real container id. Accepts either the
+   * exact container name/id or a Compose *service* name (e.g. "app"), since the
+   * service name is usually not the container name.
+   */
+  async #resolveContainer(): Promise<string | null> {
+    const want = this.#opts.npmContainer;
+    const list = await this.#docker<
+      Array<{ Id: string; Names?: string[]; Labels?: Record<string, string> }>
+    >("GET", "/containers/json", null);
+    const match = list.find(
+      (c) =>
+        c.Names?.some((n) => n === `/${want}` || n === want) ||
+        c.Labels?.["com.docker.compose.service"] === want,
+    );
+    return match?.Id ?? null;
   }
 
   #docker<T = unknown>(method: string, urlPath: string, payload: unknown): Promise<T> {
-    const data = JSON.stringify(payload);
+    const data = payload === null ? "" : JSON.stringify(payload);
     return new Promise<T>((resolve, reject) => {
       const req = http.request(
         {
           socketPath: this.#opts.dockerSocket,
           method,
           path: urlPath,
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(data),
-          },
+          headers: data
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(data),
+              }
+            : {},
         },
         (res) => {
           let chunks = "";
@@ -151,7 +175,7 @@ export class BanEnforcer {
         },
       );
       req.on("error", reject);
-      req.write(data);
+      if (data) req.write(data);
       req.end();
     });
   }
