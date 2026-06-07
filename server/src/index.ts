@@ -40,6 +40,7 @@ async function main(): Promise<void> {
     mailer,
     (msg, extra) => app.log.info({ ...(extra as object) }, msg),
     config.siteUrl,
+    (id) => hosts.label(id),
   );
 
   const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer };

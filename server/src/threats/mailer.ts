@@ -24,7 +24,12 @@ export class Mailer {
     return this.#cfg.apiKey.length > 0;
   }
 
-  async send(to: string, subject: string, text: string): Promise<SendResult> {
+  async send(
+    to: string,
+    subject: string,
+    text: string,
+    html?: string,
+  ): Promise<SendResult> {
     if (!this.configured) return { ok: false, error: "RESEND_API_KEY not set" };
     if (!to) return { ok: false, error: "no recipient configured" };
 
@@ -40,6 +45,7 @@ export class Mailer {
           to: [to],
           subject,
           text,
+          ...(html ? { html } : {}),
         }),
       });
       if (!res.ok) {

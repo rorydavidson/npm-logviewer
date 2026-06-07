@@ -203,6 +203,8 @@ When findings reach the chosen severity, ProxyLogs sends one bundled email per c
 
 **Deep links:** when `SITE_URL` is set, each email links to the Threats tab and, per finding, to the access logs pre-filtered to the offending IP and time window, so you can jump straight to the entry in question.
 
+Alerts are sent as formatted **HTML** (with a plain-text fallback) and include, per finding: severity, rule, source IP and its location, the targeted proxy hosts with counts, hit count, detail, first/last seen, a sample request, and the deep link.
+
 ## Security
 
 The viewer is built to sit on the public internet behind NPM, so it ships with sensible defaults:

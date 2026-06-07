@@ -189,6 +189,7 @@ describe("ThreatEngine email alerts", () => {
     to: string;
     subject: string;
     text: string;
+    html?: string;
   }
 
   function setup(siteUrl: string) {
@@ -197,8 +198,8 @@ describe("ThreatEngine email alerts", () => {
     const sent: Sent[] = [];
     const fakeMailer = {
       configured: true,
-      send: async (to: string, subject: string, text: string) => {
-        sent.push({ to, subject, text });
+      send: async (to: string, subject: string, text: string, html?: string) => {
+        sent.push({ to, subject, text, html });
         return { ok: true };
       },
     } as unknown as Mailer;
@@ -229,6 +230,11 @@ describe("ThreatEngine email alerts", () => {
     expect(sent[0]?.to).toBe("ops@example.com");
     expect(sent[0]?.text).toContain("https://logs.example.com/threats");
     expect(sent[0]?.text).toContain("https://logs.example.com/logs?client=198.51.100.30");
+    // Rich HTML body with the finding details and a deep link.
+    expect(sent[0]?.html).toContain("<html");
+    expect(sent[0]?.html).toContain("ProxyLogs security alert");
+    expect(sent[0]?.html).toContain("View matching log entries");
+    expect(sent[0]?.html).toContain("198.51.100.30");
     store.close();
   });
 

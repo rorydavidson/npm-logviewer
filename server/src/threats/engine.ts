@@ -3,6 +3,7 @@ import type { Settings } from "../store/settings.js";
 import type { Mailer } from "./mailer.js";
 import { DETECTORS, defaultConfig } from "./detectors.js";
 import { ipMatchesAny } from "../ingest/networks.js";
+import { geoForSubject, targetsForSubject, type TargetHost } from "./enrich.js";
 import {
   SEVERITY_RANK,
   type Finding,
@@ -20,6 +21,7 @@ export class ThreatEngine {
   #timer: NodeJS.Timeout | null = null;
   #onLog: (msg: string, extra?: unknown) => void;
   #siteUrl: string;
+  #label: (hostId: number | null) => string;
 
   constructor(
     db: DB,
@@ -27,12 +29,15 @@ export class ThreatEngine {
     mailer: Mailer,
     onLog: (msg: string, extra?: unknown) => void = () => {},
     siteUrl = "",
+    label: (hostId: number | null) => string = (id) =>
+      id === null ? "fallback" : `host-${id}`,
   ) {
     this.#db = db;
     this.#settings = settings;
     this.#mailer = mailer;
     this.#onLog = onLog;
     this.#siteUrl = siteUrl.replace(/\/+$/, "");
+    this.#label = label;
     this.#upsert = db.prepare(`
       INSERT INTO threat_finding
         (rule, subject, severity, title, detail, host_label, sample, count, first_ts, last_ts, acknowledged)
@@ -157,12 +162,20 @@ export class ThreatEngine {
     // concerted attack (multiple findings) rather than a single hit.
     if (toReport.length < cfg.alertMinFindings) return;
 
+    // Enrich each finding with geo + targeted hosts for the email.
+    const enriched: EnrichedFinding[] = toReport.map((f) => ({
+      ...f,
+      geo: geoForSubject(this.#db, f.subject),
+      targets: targetsForSubject(this.#db, this.#label, f.subject, f.lastTs),
+    }));
+
     const subject = `[ProxyLogs] ${toReport.length} security finding${
       toReport.length === 1 ? "" : "s"
     } (${highest(toReport)})`;
-    const body = renderEmail(cfg, toReport, this.#siteUrl);
+    const text = renderText(cfg, enriched, this.#siteUrl);
+    const html = renderHtml(cfg, enriched, this.#siteUrl);
 
-    const result = await this.#mailer.send(cfg.alertEmail, subject, body);
+    const result = await this.#mailer.send(cfg.alertEmail, subject, text, html);
     if (result.ok) {
       for (const rule of rulesReady) this.#settings.set(`cooldown:${rule}`, String(now));
       this.#onLog("threat alert sent", { count: toReport.length });
@@ -248,41 +261,164 @@ export class ThreatEngine {
   }
 }
 
+interface EnrichedFinding extends Finding {
+  geo: { country: string | null; city: string | null };
+  targets: TargetHost[];
+}
+
 function highest(findings: Finding[]): string {
   return findings
     .map((f) => f.severity)
     .sort((a, b) => SEVERITY_RANK[b] - SEVERITY_RANK[a])[0] as string;
 }
 
-function renderEmail(cfg: ThreatConfig, findings: Finding[], siteUrl: string): string {
+const PAD_MS = 10 * 60 * 1000;
+
+function logsLink(siteUrl: string, f: Finding): string | null {
+  if (!siteUrl || f.subject === "global") return null;
+  const q = new URLSearchParams({
+    client: f.subject,
+    from: String(f.firstTs - PAD_MS),
+    to: String(f.lastTs + PAD_MS),
+  });
+  return `${siteUrl}/logs?${q.toString()}`;
+}
+
+function location(geo: { country: string | null; city: string | null }): string {
+  return [geo.city, geo.country].filter(Boolean).join(", ");
+}
+
+function fmtTs(ts: number): string {
+  return new Date(ts).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+
+function renderText(cfg: ThreatConfig, findings: EnrichedFinding[], siteUrl: string): string {
   const lines = [
     "ProxyLogs detected suspicious activity against your Nginx Proxy Manager hosts.",
-    `Window: last ${cfg.windowMinutes} minutes.`,
+    `Window: last ${cfg.windowMinutes} minutes · ${findings.length} finding(s).`,
     "",
   ];
   for (const f of findings) {
     lines.push(`• [${f.severity.toUpperCase()}] ${f.title}`);
-    lines.push(`    subject: ${f.subject}`);
-    lines.push(`    ${f.detail}`);
-    if (f.sample) lines.push(`    sample: ${f.sample}`);
-    if (siteUrl && f.subject !== "global") {
-      // Deep link to the access logs filtered to this client over the window.
-      const from = f.firstTs - cfg.windowMinutes * 60_000;
-      const q = new URLSearchParams({
-        client: f.subject,
-        from: String(from),
-        to: String(f.lastTs),
-      });
-      lines.push(`    investigate: ${siteUrl}/logs?${q.toString()}`);
+    lines.push(`    source: ${f.subject}${location(f.geo) ? ` (${location(f.geo)})` : ""}`);
+    if (f.targets.length) {
+      lines.push(
+        `    targets: ${f.targets.map((t) => `${t.label} (${t.count})`).join(", ")}`,
+      );
     }
+    lines.push(`    hits: ${f.count}`);
+    lines.push(`    ${f.detail}`);
+    lines.push(`    first seen: ${fmtTs(f.firstTs)}  ·  last seen: ${fmtTs(f.lastTs)}`);
+    if (f.sample) lines.push(`    sample: ${f.sample}`);
+    const link = logsLink(siteUrl, f);
+    if (link) lines.push(`    investigate: ${link}`);
     lines.push("");
   }
-  if (siteUrl) {
-    lines.push(`Open the Threats tab: ${siteUrl}/threats`);
-  } else {
-    lines.push(
-      "Open the Threats tab in ProxyLogs for the full picture. (Set SITE_URL to get direct links here.)",
-    );
-  }
+  lines.push(
+    siteUrl
+      ? `Open the Threats tab: ${siteUrl}/threats`
+      : "Open the Threats tab in ProxyLogs for the full picture. (Set SITE_URL to get direct links here.)",
+  );
   return lines.join("\n");
+}
+
+const SEV_COLOUR: Record<string, string> = {
+  critical: "#dc2626",
+  high: "#ea580c",
+  medium: "#d97706",
+  low: "#2563eb",
+  info: "#6b7280",
+};
+
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderHtml(cfg: ThreatConfig, findings: EnrichedFinding[], siteUrl: string): string {
+  const cards = findings
+    .map((f) => {
+      const colour = SEV_COLOUR[f.severity] ?? SEV_COLOUR.info;
+      const loc = location(f.geo);
+      const link = logsLink(siteUrl, f);
+      const targets = f.targets.length
+        ? f.targets
+            .map(
+              (t) =>
+                `<span style="display:inline-block;background:#1f2937;color:#e5e7eb;border-radius:4px;padding:2px 6px;margin:0 4px 4px 0;font-size:12px;">${esc(
+                  t.label,
+                )} <strong>${t.count}</strong></span>`,
+            )
+            .join("")
+        : '<span style="color:#9ca3af;font-size:12px;">all hosts</span>';
+
+      return `
+      <tr><td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;">
+        <div style="margin-bottom:6px;">
+          <span style="display:inline-block;background:${colour};color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;text-transform:uppercase;">${esc(
+            f.severity,
+          )}</span>
+          <span style="font-weight:600;font-size:15px;margin-left:8px;">${esc(f.title)}</span>
+        </div>
+        <table style="font-size:13px;color:#374151;border-collapse:collapse;">
+          <tr><td style="padding:2px 10px 2px 0;color:#6b7280;">Source</td><td><strong>${esc(
+            f.subject,
+          )}</strong>${loc ? ` <span style="color:#6b7280;">(${esc(loc)})</span>` : ""}</td></tr>
+          <tr><td style="padding:2px 10px 2px 0;color:#6b7280;">Targets</td><td>${targets}</td></tr>
+          <tr><td style="padding:2px 10px 2px 0;color:#6b7280;">Hits</td><td>${f.count}</td></tr>
+          <tr><td style="padding:2px 10px 2px 0;color:#6b7280;">Detail</td><td>${esc(
+            f.detail,
+          )}</td></tr>
+          <tr><td style="padding:2px 10px 2px 0;color:#6b7280;">Seen</td><td>${esc(
+            fmtTs(f.firstTs),
+          )} → ${esc(fmtTs(f.lastTs))}</td></tr>
+          ${
+            f.sample
+              ? `<tr><td style="padding:2px 10px 2px 0;color:#6b7280;">Sample</td><td style="font-family:monospace;font-size:12px;word-break:break-all;">${esc(
+                  f.sample,
+                )}</td></tr>`
+              : ""
+          }
+        </table>
+        ${
+          link
+            ? `<div style="margin-top:8px;"><a href="${esc(
+                link,
+              )}" style="color:#2563eb;font-size:13px;text-decoration:none;">View matching log entries →</a></div>`
+            : ""
+        }
+      </td></tr>
+      <tr><td style="height:10px;"></td></tr>`;
+    })
+    .join("");
+
+  const threatsLink = siteUrl
+    ? `<a href="${esc(siteUrl)}/threats" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:9px 16px;border-radius:6px;font-size:14px;">Open the Threats dashboard</a>`
+    : `<span style="color:#6b7280;font-size:13px;">Set SITE_URL to get direct links in these emails.</span>`;
+
+  return `<!doctype html><html><body style="margin:0;background:#f3f4f6;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:10px;padding:24px;">
+        <tr><td>
+          <h1 style="margin:0 0 4px;font-size:18px;">🛡️ ProxyLogs security alert</h1>
+          <p style="margin:0 0 16px;color:#6b7280;font-size:13px;">
+            ${findings.length} finding${findings.length === 1 ? "" : "s"} in the last ${
+              cfg.windowMinutes
+            } minutes against your Nginx Proxy Manager hosts.
+          </p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${cards}</table>
+          <div style="margin-top:8px;">${threatsLink}</div>
+          <p style="margin:20px 0 0;color:#9ca3af;font-size:11px;">
+            You are receiving this because ProxyLogs threat alerts are enabled.
+            Adjust rules, severities, and the alert threshold in the Threats tab.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
 }
