@@ -15,20 +15,23 @@ export default function Logs({ filters }: { filters: Filters }) {
   // Deep links (e.g. from alert emails) can pre-filter by client and time
   // range via the URL: /logs?client=1.2.3.4&from=...&to=...
   const clientParam = params.get("client") ?? undefined;
+  const hostParam = params.get("hostId") ?? undefined;
   const fromParam = params.get("from");
   const toParam = params.get("to");
 
   const effective: Filters = useMemo(() => {
     const f = { ...filters };
     if (clientParam) f.client = clientParam;
+    if (hostParam) f.hostId = hostParam;
     if (fromParam) f.from = Number(fromParam);
     if (toParam) f.to = Number(toParam);
     return f;
-  }, [filters, clientParam, fromParam, toParam]);
+  }, [filters, clientParam, hostParam, fromParam, toParam]);
 
   const clearDeepLink = () => {
     const next = new URLSearchParams(params);
     next.delete("client");
+    next.delete("hostId");
     next.delete("from");
     next.delete("to");
     setParams(next, { replace: true });

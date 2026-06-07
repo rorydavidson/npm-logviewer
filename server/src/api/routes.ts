@@ -206,6 +206,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
         ...f,
         // For IP subjects, attach geo so the UI can show a flag.
         ...geoForSubject(db, f.subject),
+        // Which proxy hosts this subject has been hitting.
+        targets: targetsForSubject(db, hosts, f.subject, f.lastTs),
       })),
     };
   });
@@ -314,6 +316,36 @@ function geoForSubject(
     | { country: string | null; city: string | null }
     | undefined;
   return { country: g?.country ?? null, city: g?.city ?? null };
+}
+
+// The proxy hosts a finding subject (client IP) has been hitting, most first.
+function targetsForSubject(
+  db: import("../store/db.js").DB,
+  hosts: HostMap,
+  subject: string,
+  lastTs: number,
+): Array<{ hostId: number | null; label: string; count: number }> {
+  if (subject === "global") return [];
+  // Look back a day from when the finding was last seen.
+  const from = lastTs - 24 * 60 * 60 * 1000;
+  const rows = db
+    .prepare(
+      `SELECT host_id AS hostId, COUNT(*) AS count
+         FROM access_log
+        WHERE client = ? AND ts >= ? AND ts <= ?
+        GROUP BY host_id
+        ORDER BY count DESC
+        LIMIT 5`,
+    )
+    .all(subject, from, lastTs) as unknown as Array<{
+    hostId: number | null;
+    count: number;
+  }>;
+  return rows.map((r) => ({
+    hostId: r.hostId,
+    label: hosts.label(r.hostId),
+    count: r.count,
+  }));
 }
 
 // Attach geo (country/city) to a top-clients row by looking up one sample.

@@ -186,6 +186,8 @@ The **Threats** tab runs a set of detectors over a rolling window (default 10 mi
 
 Everything is editable in the UI: enable/disable each rule, change its severity, adjust thresholds, and edit the match patterns for the pattern-based rules. Settings persist in the state database.
 
+Each finding shows the attacker IP (with country flag) and the **proxy hosts it has been hitting**, with per-host counts. Click a target host, or **View logs →**, to jump straight to the matching access-log entries (pre-filtered by IP, time window, and optionally host).
+
 **Exceptions:** add trusted IPs or CIDR ranges (e.g. your own address) so they are ignored by every rule. Use the **Trust IP** button on any finding, or edit the list in Settings. Existing findings for a newly trusted address are removed on the next cycle.
 
 ### Email alerts (Resend)

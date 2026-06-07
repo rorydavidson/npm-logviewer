@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { ErrorBox, Panel, SeverityBadge, Spinner } from "../components/ui";
 import { flag, num, time } from "../lib/format";
@@ -10,6 +11,19 @@ import type {
 } from "../lib/types";
 
 const SEVERITIES: Severity[] = ["info", "low", "medium", "high", "critical"];
+
+const PAD = 10 * 60 * 1000; // widen the time window a little around the finding
+
+/** Deep link to the access logs for a finding, optionally narrowed to a host. */
+function logsHref(f: Finding, hostId?: number | null): string {
+  const p = new URLSearchParams({
+    client: f.subject,
+    from: String(f.firstTs - PAD),
+    to: String(f.lastTs + PAD),
+  });
+  if (hostId !== undefined && hostId !== null) p.set("hostId", String(hostId));
+  return `/logs?${p.toString()}`;
+}
 
 export default function Threats() {
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -202,7 +216,34 @@ export default function Threats() {
                   )}
                 </span>
                 <span className="tabular-nums text-gray-400">{num(f.count)} hits</span>
+                {f.subject !== "global" && (
+                  <Link
+                    to={logsHref(f)}
+                    className="ml-auto text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    View logs →
+                  </Link>
+                )}
               </div>
+
+              {/* Targeted hosts */}
+              {f.targets && f.targets.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="text-gray-500">target:</span>
+                  {f.targets.map((t) => (
+                    <Link
+                      key={String(t.hostId)}
+                      to={logsHref(f, t.hostId)}
+                      title={`View ${t.label} logs from ${f.subject}`}
+                      className="rounded border border-gray-700 bg-gray-800/60 px-1.5 py-0.5 text-gray-300 hover:border-blue-500/50 hover:text-white"
+                    >
+                      {t.label}
+                      <span className="ml-1 tabular-nums text-gray-500">{num(t.count)}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+
               <div className="mt-1 text-sm text-gray-400">{f.detail}</div>
               {f.sample && (
                 <div className="mt-1 truncate font-mono text-xs text-gray-500" title={f.sample}>

@@ -149,6 +149,7 @@ export interface Finding {
   acknowledged: boolean;
   country: string | null;
   city: string | null;
+  targets?: { hostId: number | null; label: string; count: number }[];
 }
 
 export interface ThreatsResponse {
