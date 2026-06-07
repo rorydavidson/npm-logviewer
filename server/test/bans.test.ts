@@ -100,6 +100,17 @@ describe("BanService", () => {
     expect(conf).not.toContain("203.0.113.7");
   });
 
+  it("does not rewrite the deny file when the list is unchanged", async () => {
+    const svc = makeService(store.db, dir, []);
+    await svc.ban("203.0.113.7", { now: 1 });
+    const file = path.join(dir, "proxylogs-bans.conf");
+    const mtime1 = fs.statSync(file).mtimeMs;
+    await new Promise((r) => setTimeout(r, 15));
+    await svc.sync(); // same list -> should be a no-op write
+    const mtime2 = fs.statSync(file).mtimeMs;
+    expect(mtime2).toBe(mtime1);
+  });
+
   it("does not duplicate the include line", async () => {
     const svc = makeService(store.db, dir, []);
     await svc.ban("203.0.113.7", { now: 1 });
@@ -163,6 +174,35 @@ describe("auto-ban via the engine", () => {
     const banned = svc.list().map((b) => b.ip);
     expect(banned).toContain(attacker);
     expect(banned).not.toContain("198.51.100.99");
+  });
+
+  it("batches multiple auto-bans into one synced file", async () => {
+    const settings = new Settings(store.db);
+    const engine = new ThreatEngine(
+      store.db,
+      settings,
+      new Mailer({ apiKey: "", from: "x@y.z" }),
+    );
+    const svc = makeService(store.db, dir, []);
+    engine.setBanService(svc);
+    const cfg = engine.getConfig();
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2 };
+    engine.setConfig(cfg);
+
+    const rows: AccessEntry[] = [];
+    for (const ip of ["45.137.21.60", "45.137.21.61"]) {
+      for (let i = 0; i < 35; i++) rows.push(entry({ status: 404, uri: `/m-${i}`, client: ip }));
+      rows.push(entry({ status: 404, uri: "/.env", client: ip }));
+    }
+    store.insertAccessBatch(rows);
+    await engine.evaluate();
+
+    const banned = svc.list().map((b) => b.ip);
+    expect(banned).toContain("45.137.21.60");
+    expect(banned).toContain("45.137.21.61");
+    const conf = fs.readFileSync(path.join(dir, "proxylogs-bans.conf"), "utf8");
+    expect(conf).toContain("deny 45.137.21.60;");
+    expect(conf).toContain("deny 45.137.21.61;");
   });
 
   it("does not auto-ban when disabled", async () => {

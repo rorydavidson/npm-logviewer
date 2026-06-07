@@ -265,6 +265,14 @@ For defence in depth, you can also put the viewer behind an NPM Access List (HTT
 - The parsed-log database grows with traffic; `BACKFILL_DAYS` doubles as a daily retention window so it stays bounded.
 - Requires **Node 24+** at runtime for the built-in `node:sqlite` module. There are no native modules to compile.
 
+## Performance impact on NPM
+
+Under normal use the impact on NPM is negligible: ProxyLogs reads `/data` and NPM's database read-only on its own connection, and all parsing/queries run in its own container. Things to be aware of over time:
+
+- **Ban list size.** Bans become nginx `deny` rules, which nginx checks per request. A few hundred entries is invisible; tens of thousands (from aggressive long-running auto-ban) add a small per-request cost and slow config reloads. Prefer banning CIDRs over many single IPs, and periodically prune stale bans. Auto-ban is conservative by default (critical + multiple findings) to keep the list small.
+- **nginx reloads.** Ban changes trigger an `nginx -s reload` only when automatic reload is enabled. ProxyLogs batches all of a detection cycle's bans into a single reload, and skips the reload entirely when the rule file is unchanged, so even under sustained attack it reloads at most once per cycle.
+- **Disk.** The parsed-log database grows with traffic but is capped by `BACKFILL_DAYS` (daily prune). It shares the host disk with NPM, so size `BACKFILL_DAYS` to your retention needs and disk.
+
 ## Built with
 
 - Backend: [Fastify](https://fastify.dev/), Node's built-in `node:sqlite`, [geoip-lite](https://github.com/geoip-lite/node-geoip) (offline geolocation), [bcryptjs](https://github.com/dcodeIO/bcrypt.js), [chokidar](https://github.com/paulmillr/chokidar).

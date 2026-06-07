@@ -172,21 +172,24 @@ export class ThreatEngine {
     const bans = this.#bans;
     if (!bans) return;
     const minRank = SEVERITY_RANK[cfg.autoBan.minSeverity];
+    let bannedAny = false;
     for (const [ip, agg] of bySubject) {
       const peak = Math.max(...agg.severities.map((s) => SEVERITY_RANK[s]));
       if (peak < minRank) continue;
       if (agg.rules.size < cfg.autoBan.minFindings) continue;
       if (bans.has(ip)) continue;
       const result = await bans.ban(ip, {
-        reason: `auto: ${agg.rules.size} findings (peak ${
-          cfg.autoBan.minSeverity
-        }+)`,
+        reason: `auto: ${agg.rules.size} findings (peak ${cfg.autoBan.minSeverity}+)`,
         rule: [...agg.rules].join(","),
         auto: true,
         now,
+        deferSync: true, // batch: write the file + reload nginx once below
       });
-      if (!result.ok) this.#onLog("auto-ban skipped", { ip, reason: result.reason });
+      if (result.ok) bannedAny = true;
+      else this.#onLog("auto-ban skipped", { ip, reason: result.reason });
     }
+    // One file write + at most one nginx reload per cycle, however many bans.
+    if (bannedAny) await bans.sync();
   }
 
   /** Send one bundled email for alertable findings whose rule cooldown elapsed. */

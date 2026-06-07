@@ -50,6 +50,19 @@ export class BanEnforcer {
       "\n";
 
     const target = path.join(customDir, BAN_FILENAME);
+
+    // Skip the write + nginx reload when nothing changed. This avoids reload
+    // churn when sync() runs repeatedly (boot, batched auto-bans) with an
+    // unchanged list — important under sustained attacks.
+    let existing: string | null = null;
+    try {
+      existing = fs.readFileSync(target, "utf8");
+    } catch {
+      existing = null;
+    }
+    this.#ensureInclude();
+    if (existing === body) return;
+
     const tmp = `${target}.tmp`;
     try {
       fs.writeFileSync(tmp, body, { mode: 0o644 });
@@ -59,7 +72,6 @@ export class BanEnforcer {
       return;
     }
 
-    this.#ensureInclude();
     await this.#reload();
   }
 

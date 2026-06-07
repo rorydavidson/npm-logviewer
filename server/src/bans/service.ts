@@ -40,7 +40,14 @@ export class BanService {
 
   async ban(
     ip: string,
-    opts: { reason?: string; rule?: string | null; auto?: boolean; now: number },
+    opts: {
+      reason?: string;
+      rule?: string | null;
+      auto?: boolean;
+      now: number;
+      /** Skip rewriting/reloading nginx now (caller will sync() once). */
+      deferSync?: boolean;
+    },
   ): Promise<BanResult> {
     const target = ip.trim();
     if (this.#isException(target)) return { ok: false, reason: "IP is on the exception list" };
@@ -51,7 +58,7 @@ export class BanService {
     if (!this.#store.add(target, opts)) {
       return { ok: false, reason: "not a valid IP or CIDR" };
     }
-    await this.sync();
+    if (!opts.deferSync) await this.sync();
     if (opts.auto) this.#log("auto-banned IP", { ip: target, rule: opts.rule });
     return { ok: true };
   }
