@@ -64,6 +64,7 @@ export interface Overview {
   topUserAgents: Bucketed[];
   geo: CountryStat[];
   perHost: HostStat[];
+  bannedClients: string[];
 }
 
 export interface AccessRow {
@@ -81,6 +82,7 @@ export interface AccessRow {
   city: string | null;
   userAgent: string;
   referer: string;
+  banned?: boolean;
 }
 
 export interface ErrorRow {
@@ -167,6 +169,7 @@ export interface Finding {
   country: string | null;
   city: string | null;
   targets?: { hostId: number | null; label: string; count: number }[];
+  banned?: boolean;
 }
 
 export interface ThreatsResponse {

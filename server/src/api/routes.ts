@@ -142,6 +142,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
       topUserAgents: A.getTopUserAgents(db, f),
       geo: A.getGeo(db, f),
       perHost,
+      bannedClients: A.getTopClients(db, f)
+        .map((c) => c.key)
+        .filter(bans.checker()),
     };
   });
 
@@ -173,11 +176,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     const limit = Math.min(500, num(q.limit, 100));
     const offset = Math.max(0, num(q.offset, 0));
     const page = A.queryAccess(db, f, limit, offset);
+    const isBanned = bans.checker();
     return {
       total: page.total,
       limit,
       offset,
-      rows: page.rows.map((r) => ({ ...r, hostLabel: hosts.label(r.hostId) })),
+      rows: page.rows.map((r) => ({
+        ...r,
+        hostLabel: hosts.label(r.hostId),
+        banned: isBanned(r.client),
+      })),
     };
   });
 
@@ -203,6 +211,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
       rule: q.rule || undefined,
       includeAcked: q.acked === "1",
     });
+    const isBanned = bans.checker();
     return {
       counts: engine.counts(),
       findings: findings.map((f) => ({
@@ -211,6 +220,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
         ...geoForSubject(db, f.subject),
         // Which proxy hosts this subject has been hitting.
         targets: targetsForSubject(db, (id) => hosts.label(id), f.subject, f.lastTs),
+        banned: f.subject !== "global" && isBanned(f.subject),
       })),
     };
   });
@@ -316,7 +326,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
 
     const onAccess = (e: AccessEntry) => {
       reply.raw.write(
-        `event: access\ndata: ${JSON.stringify({ ...e, hostLabel: hosts.label(e.hostId) })}\n\n`,
+        `event: access\ndata: ${JSON.stringify({
+          ...e,
+          hostLabel: hosts.label(e.hostId),
+          banned: bans.checker()(e.client),
+        })}\n\n`,
       );
     };
     const onError = (e: ErrorEntry) => {

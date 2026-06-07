@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Panel, StatusBadge } from "../components/ui";
+import { BannedBadge, Panel, StatusBadge } from "../components/ui";
 import { flag, time } from "../lib/format";
 
 interface LiveAccess {
@@ -12,6 +12,7 @@ interface LiveAccess {
   uri: string;
   client: string;
   country: string | null;
+  banned: boolean;
 }
 interface LiveError {
   kind: "error";
@@ -55,6 +56,7 @@ export default function Live() {
         uri: d.uri,
         client: d.client,
         country: d.country ?? null,
+        banned: Boolean(d.banned),
       });
     });
     es.addEventListener("error", (ev) => {
@@ -124,8 +126,9 @@ export default function Live() {
               <span className="text-gray-500">{e.method}</span>
               <span className="text-gray-400">{e.hostLabel}</span>
               <span className="truncate text-gray-200">{e.uri}</span>
-              <span className="ml-auto whitespace-nowrap text-gray-500">
+              <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-gray-500">
                 {flag(e.country)} {e.client}
+                {e.banned && <BannedBadge />}
               </span>
             </div>
           ) : (

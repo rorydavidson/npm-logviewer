@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
-import { ErrorBox, Panel, Spinner, StatusBadge } from "../components/ui";
+import { BannedBadge, ErrorBox, Panel, Spinner, StatusBadge } from "../components/ui";
 import { bytes, flag, time } from "../lib/format";
 import type { AccessRow, Filters } from "../lib/types";
 
@@ -122,6 +122,11 @@ export default function Logs({ filters }: { filters: Filters }) {
                 </td>
                 <td className="whitespace-nowrap py-1.5 pr-3 text-gray-400">
                   {flag(r.country)} {r.client}
+                  {r.banned && (
+                    <span className="ml-1.5 align-middle">
+                      <BannedBadge />
+                    </span>
+                  )}
                 </td>
                 <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-gray-400">
                   {bytes(r.bytes)}

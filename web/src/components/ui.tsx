@@ -121,6 +121,17 @@ export function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
+export function BannedBadge() {
+  return (
+    <span
+      title="This IP is on the ban list"
+      className="rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-400"
+    >
+      Banned
+    </span>
+  );
+}
+
 export function StatusBadge({ status }: { status: number }) {
   const cls =
     status >= 500

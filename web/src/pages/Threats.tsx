@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { ErrorBox, Panel, SeverityBadge, Spinner } from "../components/ui";
+import { BannedBadge, ErrorBox, Panel, SeverityBadge, Spinner } from "../components/ui";
 import { flag, num, time } from "../lib/format";
 import type {
   DetectorMeta,
@@ -100,9 +100,15 @@ export default function Threats() {
     try {
       await api.banIp(ip, "manual ban from Threats");
       flash(`${ip} banned`);
+      void reload();
     } catch (e) {
       flash(e instanceof Error ? `Ban failed: ${e.message}` : "Ban failed");
     }
+  };
+  const unbanIp = async (ip: string) => {
+    await api.unbanIp(ip);
+    flash(`${ip} unbanned`);
+    void reload();
   };
 
   if (loading) return <Spinner />;
@@ -198,13 +204,23 @@ export default function Threats() {
                 </span>
                 {f.subject !== "global" && (
                   <>
-                    <button
-                      onClick={() => banIp(f.subject)}
-                      title="Ban this IP (adds an nginx deny rule)"
-                      className="rounded border border-red-900/60 px-2 py-0.5 text-xs text-red-400 hover:bg-red-950/40"
-                    >
-                      Ban IP
-                    </button>
+                    {f.banned ? (
+                      <button
+                        onClick={() => unbanIp(f.subject)}
+                        title="Remove this IP from the ban list"
+                        className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-800"
+                      >
+                        Unban
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => banIp(f.subject)}
+                        title="Ban this IP (adds an nginx deny rule)"
+                        className="rounded border border-red-900/60 px-2 py-0.5 text-xs text-red-400 hover:bg-red-950/40"
+                      >
+                        Ban IP
+                      </button>
+                    )}
                     <button
                       onClick={() => trustIp(f.subject)}
                       title="Add this IP to the exception list"
@@ -229,6 +245,11 @@ export default function Threats() {
                     <>
                       {flag(f.country)} <span className="font-mono">{f.subject}</span>
                       {f.city ? ` · ${f.city}` : ""}
+                      {f.banned && (
+                        <span className="ml-2 align-middle">
+                          <BannedBadge />
+                        </span>
+                      )}
                     </>
                   )}
                 </span>

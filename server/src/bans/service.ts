@@ -1,6 +1,6 @@
 import { BanStore, type Ban } from "./store.js";
 import type { BanEnforcer } from "./enforcer.js";
-import { classifyIp } from "../ingest/networks.js";
+import { classifyIp, ipMatchesAny } from "../ingest/networks.js";
 
 export interface BanResult {
   ok: boolean;
@@ -75,6 +75,19 @@ export class BanService {
   /** True if this exact IP/CIDR is already banned. */
   has(ip: string): boolean {
     return this.#store.has(ip.trim());
+  }
+
+  /**
+   * Build a checker that reports whether an IP is covered by the ban list
+   * (exact match or within a banned CIDR). Captures the list once, so callers
+   * can test many IPs cheaply within a single request.
+   */
+  checker(): (ip: string) => boolean {
+    const ips = this.#store.ips();
+    const exact = new Set(ips.filter((i) => !i.includes("/")));
+    const cidrs = ips.filter((i) => i.includes("/"));
+    return (ip: string) =>
+      exact.has(ip) || (cidrs.length > 0 && ipMatchesAny(ip, cidrs));
   }
 
   /** Re-materialise the nginx snippet from the current list. */

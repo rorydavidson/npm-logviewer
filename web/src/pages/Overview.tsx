@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
-import { BarList, ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
+import { BannedBadge, BarList, ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
 import {
   bytes,
   countryName,
@@ -65,6 +65,7 @@ export default function Overview({
   ].filter((d) => d.value > 0);
 
   const geoMax = Math.max(1, ...data.geo.map((g) => g.count));
+  const bannedSet = new Set(data.bannedClients ?? []);
 
   return (
     <div className="space-y-4">
@@ -254,11 +255,19 @@ export default function Overview({
         </Panel>
         <Panel title="Top clients">
           <BarList
-            rows={data.topClients.map((c) => ({
-              label: `${flag(c.country)} ${c.key}`,
-              value: c.count,
-              hint: c.city ?? undefined,
-            }))}
+            rows={data.topClients.map((c) => {
+              const banned = bannedSet.has(c.key);
+              return {
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    {flag(c.country)} {c.key}
+                    {banned && <BannedBadge />}
+                  </span>
+                ),
+                value: c.count,
+                hint: c.city ?? undefined,
+              };
+            })}
           />
         </Panel>
         <Panel title="Top referrers">
