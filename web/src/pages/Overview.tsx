@@ -162,8 +162,8 @@ export default function Overview({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Status donut */}
         <Panel title="Status codes">
-          <div className="flex items-center">
-            <div className="h-48 w-1/2">
+          <div className="flex flex-col items-center sm:flex-row">
+            <div className="h-48 w-full sm:w-1/2">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -189,7 +189,7 @@ export default function Overview({
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <div className="w-1/2 space-y-2 text-sm">
+            <div className="w-full space-y-2 text-sm sm:w-1/2">
               {donut.map((d) => (
                 <div key={d.name} className="flex items-center justify-between">
                   <span className="flex items-center gap-2 text-gray-300">
