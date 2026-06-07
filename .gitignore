@@ -1,0 +1,14 @@
+.vscode/settings.json
+.DS_Store
+.claude/
+node_modules/
+dist/
+*.log
+.env
+.env.local
+coverage/
+state/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.tsbuildinfo

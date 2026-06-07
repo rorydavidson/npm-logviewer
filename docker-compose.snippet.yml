@@ -1,0 +1,36 @@
+# Paste this service into the SAME docker-compose.yml that runs Nginx Proxy
+# Manager, so both containers share the NPM data volume.
+#
+# MOUNT POINTS (the important bit):
+#   - The NPM `data` volume is mounted READ-ONLY at /data. This must be the
+#     exact same source path NPM uses for its own /data mount, so we see its
+#     logs (/data/logs) and database (/data/database.sqlite).
+#   - A SEPARATE writable volume is mounted at /state for our own parsed-log
+#     database. /data stays read-only; we never write to NPM's files.
+#
+# Adjust `./data` below to match your NPM compose (it is NPM's default).
+
+services:
+  logviewer:
+    build: ./nginx-logviewer        # or: image: ghcr.io/you/nginx-logviewer:latest
+    container_name: npm-logviewer
+    restart: unless-stopped
+    depends_on:
+      - app                          # NPM service name; rename to match yours
+    environment:
+      NPM_DATA: /data                # where the NPM volume is mounted (below)
+      STATE_DB: /state/logviewer.sqlite
+      SESSION_SECRET: ${LOGVIEWER_SECRET}   # set in your .env, 32+ random chars
+      BACKFILL_DAYS: 14              # how much history to index on first boot
+      SECURE_COOKIE: "true"          # set true when served over HTTPS via NPM
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/data:ro              # SAME source as NPM's /data mount
+      - logviewer-state:/state       # our own writable DB lives here
+    # No published ports by default — proxy it through NPM itself (see README).
+    # To reach it directly during setup, uncomment:
+    # ports:
+    #   - "8090:8090"
+
+volumes:
+  logviewer-state:

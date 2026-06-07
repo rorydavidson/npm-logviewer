@@ -1,0 +1,38 @@
+# Complete reference stack: Nginx Proxy Manager + this log viewer, sharing the
+# same data volume. Use this if you want a full working example; otherwise copy
+# just the `logviewer` service into your existing NPM compose.
+
+services:
+  app:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm-app
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"     # NPM admin UI
+      - "443:443"
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+
+  logviewer:
+    build: .
+    container_name: npm-logviewer
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      NPM_DATA: /data
+      STATE_DB: /state/logviewer.sqlite
+      SESSION_SECRET: ${LOGVIEWER_SECRET}
+      BACKFILL_DAYS: 14
+      SECURE_COOKIE: "false"   # true once behind HTTPS
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/data:ro        # shares NPM's logs + database, read-only
+      - logviewer-state:/state
+    ports:
+      - "8090:8090"            # remove once proxied through NPM
+
+volumes:
+  logviewer-state:
