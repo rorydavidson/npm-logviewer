@@ -28,6 +28,10 @@ export interface Config {
   webDir: string;
   /** Set true when served over HTTPS so the cookie gets the Secure flag. */
   secureCookie: boolean;
+  /** Resend API key for threat alert emails (empty disables sending). */
+  resendApiKey: string;
+  /** From address for alert emails (must be a Resend-verified sender). */
+  alertFrom: string;
 }
 
 function envInt(name: string, fallback: number): number {
@@ -63,5 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: env.HOST ?? "0.0.0.0",
     webDir: env.WEB_DIR ?? path.resolve(process.cwd(), "../web/dist"),
     secureCookie: envBool("SECURE_COOKIE", false),
+    resendApiKey: env.RESEND_API_KEY ?? "",
+    alertFrom: env.ALERT_FROM ?? "ProxyLogs <onboarding@resend.dev>",
   };
 }

@@ -9,6 +9,10 @@ import { createToken, verifyToken, type SessionPayload } from "../auth/session.j
 import { parseFilter } from "./filter.js";
 import * as A from "../store/analytics.js";
 import type { AccessEntry, ErrorEntry } from "../types.js";
+import type { ThreatEngine } from "../threats/engine.js";
+import type { Mailer } from "../threats/mailer.js";
+import { DETECTORS } from "../threats/detectors.js";
+import type { Severity, ThreatConfig } from "../threats/types.js";
 
 const COOKIE = "lv_session";
 
@@ -18,6 +22,8 @@ export interface AppCtx {
   npm: NpmDb;
   hosts: HostMap;
   watcher: Watcher;
+  engine: ThreatEngine;
+  mailer: Mailer;
 }
 
 function num(v: unknown, fallback: number): number {
@@ -26,7 +32,7 @@ function num(v: unknown, fallback: number): number {
 }
 
 export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise<void> {
-  const { config, store, npm, hosts, watcher } = ctx;
+  const { config, store, npm, hosts, watcher, engine, mailer } = ctx;
   const db = store.db;
 
   // --- auth gate for everything under /api except login -------------------
@@ -168,6 +174,79 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     };
   });
 
+  // --- threat detection ----------------------------------------------------
+  app.get("/api/threats", async (req) => {
+    const q = req.query as Record<string, string>;
+    const findings = engine.listFindings({
+      minSeverity: (q.severity as Severity) || undefined,
+      rule: q.rule || undefined,
+      includeAcked: q.acked === "1",
+    });
+    return {
+      counts: engine.counts(),
+      findings: findings.map((f) => ({
+        ...f,
+        // For IP subjects, attach geo so the UI can show a flag.
+        ...geoForSubject(db, f.subject),
+      })),
+    };
+  });
+
+  app.post("/api/threats/ack", async (req, reply) => {
+    const { id } = (req.body ?? {}) as { id?: number };
+    if (typeof id !== "number") return reply.code(400).send({ error: "id required" });
+    engine.acknowledge(id);
+    return { ok: true };
+  });
+
+  app.post("/api/threats/ack-all", async () => {
+    engine.acknowledgeAll();
+    return { ok: true };
+  });
+
+  app.post("/api/threats/clear", async () => {
+    engine.clear();
+    return { ok: true };
+  });
+
+  app.get("/api/threats/config", async () => ({
+    config: engine.getConfig(),
+    emailConfigured: mailer.configured,
+    detectors: DETECTORS.map((d) => ({
+      id: d.id,
+      title: d.title,
+      description: d.description,
+      editable: d.editable,
+    })),
+  }));
+
+  app.put("/api/threats/config", async (req, reply) => {
+    const body = req.body as ThreatConfig | undefined;
+    if (!body || typeof body !== "object" || !body.rules) {
+      return reply.code(400).send({ error: "invalid config" });
+    }
+    engine.setConfig(body);
+    // Re-evaluate immediately so the UI reflects the new rules.
+    void engine.evaluate();
+    return { ok: true };
+  });
+
+  app.post("/api/threats/run", async () => {
+    await engine.evaluate();
+    return { ok: true };
+  });
+
+  app.post("/api/threats/test-email", async () => {
+    const cfg = engine.getConfig();
+    if (!cfg.alertEmail) return { ok: false, error: "set an alert email first" };
+    const result = await mailer.send(
+      cfg.alertEmail,
+      "[ProxyLogs] Test alert",
+      "This is a test alert from ProxyLogs. If you received it, email alerts are working.",
+    );
+    return result;
+  });
+
   // --- live tail via Server-Sent Events -----------------------------------
   app.get("/api/stream", async (req, reply) => {
     reply.raw.writeHead(200, {
@@ -203,6 +282,19 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     // Keep the handler open; Fastify resolves when the socket closes.
     await new Promise<void>((resolve) => req.raw.on("close", resolve));
   });
+}
+
+// Look up geo for a finding subject if it looks like a client IP.
+function geoForSubject(
+  db: import("../store/db.js").DB,
+  subject: string,
+): { country: string | null; city: string | null } {
+  const g = db
+    .prepare(`SELECT country, city FROM access_log WHERE client = ? LIMIT 1`)
+    .get(subject) as unknown as
+    | { country: string | null; city: string | null }
+    | undefined;
+  return { country: g?.country ?? null, city: g?.city ?? null };
 }
 
 // Attach geo (country/city) to a top-clients row by looking up one sample.

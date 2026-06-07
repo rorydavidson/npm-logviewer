@@ -10,6 +10,7 @@ Nothing is sent anywhere. Geolocation uses a bundled offline database, so the da
 - **Hosts**: per proxy host traffic, visitors, errors, error rate, bandwidth, and share of total.
 - **Access logs**: searchable, filterable, paginated raw entries.
 - **Errors**: parsed `error.log` entries grouped by host with client, request, and upstream context.
+- **Threats**: background detection of suspicious activity (scanning, brute force, exploit probing, injection payloads, hacking-tool agents, flooding, cross-host scanning, fuzzing, and more), with severities you can tune in the UI and optional email alerts.
 - **Live tail**: real-time stream of new requests and errors over Server-Sent Events.
 - Filter everything by time range, proxy host, status class, method, and path search.
 
@@ -77,6 +78,8 @@ All via environment variables:
 | `SECURE_COOKIE` | `false` | Set `true` when served over HTTPS. |
 | `PORT` | `8090` | HTTP port. |
 | `PUID` / `PGID` | `1000` | User the app runs as. Set both to `0` if NPM's `/data` files are only readable by root, or if you see "unable to open database file". |
+| `RESEND_API_KEY` | _(empty)_ | Resend API key. When set, the Threats tab can email alerts. Empty disables sending. |
+| `ALERT_FROM` | `ProxyLogs <onboarding@resend.dev>` | From address for alert emails. Must be a sender verified in your Resend account (the `onboarding@resend.dev` default only delivers to your own Resend login email). |
 
 ### Troubleshooting
 
@@ -147,6 +150,27 @@ real_ip_recursive on;
 ```
 
 Apply it, then new requests will log the visitor IP. Existing rows keep their old (wrong) location until they age out of `BACKFILL_DAYS`; to clear them immediately, remove the `logviewer-state` volume and restart so logs are re-ingested.
+
+## Threat detection and alerts
+
+The **Threats** tab runs a set of detectors over a rolling window (default 10 minutes) every minute, in the background, even when nobody is looking. Each finding has a tunable severity. Detectors include:
+
+- 404 scanning, path fuzzing, and cross-host scanning by a single client
+- auth brute force (repeated 401/403)
+- requests for known exploit paths (`.env`, `.git`, `wp-login`, phpMyAdmin, …)
+- SQLi / XSS / path-traversal payloads in the URL
+- hacking-tool user agents (sqlmap, nikto, nmap, masscan, …)
+- request floods, unusual HTTP methods, direct-IP probing, and 5xx surges
+
+Everything is editable in the UI: enable/disable each rule, change its severity, adjust thresholds, and edit the match patterns for the pattern-based rules. Settings persist in the state database.
+
+### Email alerts (Resend)
+
+1. Set `RESEND_API_KEY` (and optionally `ALERT_FROM`) in the container environment.
+2. In the Threats tab → **Settings**, set the alert email address, the minimum severity to alert on, and a cooldown (to avoid repeat spam).
+3. Use **Send test email** to confirm delivery.
+
+When findings reach the chosen severity, ProxyLogs sends one bundled email per cycle (respecting the per-rule cooldown) via the Resend HTTP API. No alerting happens until both `RESEND_API_KEY` and an alert email are set.
 
 ## Notes and trade-offs
 

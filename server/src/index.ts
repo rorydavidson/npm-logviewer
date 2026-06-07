@@ -7,6 +7,9 @@ import { Store } from "./store/store.js";
 import { NpmDb } from "./npm/npmDb.js";
 import { HostMap } from "./npm/hostMap.js";
 import { Watcher } from "./ingest/watcher.js";
+import { Settings } from "./store/settings.js";
+import { Mailer } from "./threats/mailer.js";
+import { ThreatEngine } from "./threats/engine.js";
 import { registerRoutes, type AppCtx } from "./api/routes.js";
 
 async function main(): Promise<void> {
@@ -22,7 +25,13 @@ async function main(): Promise<void> {
 
   const watcher = new Watcher(store, config.logsDir, config.backfillDays);
 
-  const ctx: AppCtx = { config, store, npm, hosts, watcher };
+  const settings = new Settings(store.db);
+  const mailer = new Mailer({ apiKey: config.resendApiKey, from: config.alertFrom });
+  const engine = new ThreatEngine(store.db, settings, mailer, (msg, extra) =>
+    app.log.info({ ...(extra as object) }, msg),
+  );
+
+  const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer };
   await registerRoutes(app, ctx);
 
   // Serve the built frontend if present (single-container deployment).
@@ -43,6 +52,10 @@ async function main(): Promise<void> {
     app.log.warn({ file, err }, "ingest error"),
   );
 
+  // Background threat detection: evaluates a rolling window every minute and
+  // emails alerts (via Resend) when findings reach the configured severity.
+  engine.start();
+
   // Daily retention prune to the configured backfill window.
   if (config.backfillDays > 0) {
     const prune = setInterval(() => {
@@ -55,6 +68,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, "shutting down");
     hosts.stop();
+    engine.stop();
     await watcher.stop();
     await app.close();
     store.close();

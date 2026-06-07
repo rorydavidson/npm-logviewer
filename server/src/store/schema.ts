@@ -55,4 +55,31 @@ CREATE TABLE IF NOT EXISTS ingest_state (
   offset INTEGER NOT NULL,
   mtime  INTEGER NOT NULL
 );
+
+-- Simple key/value store for app settings (threat-rule config, alert cooldowns).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Threat findings raised by the detection engine. One row per (rule, subject),
+-- with the count and last-seen bumped each time the rule re-fires.
+CREATE TABLE IF NOT EXISTS threat_finding (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule         TEXT NOT NULL,
+  subject      TEXT NOT NULL,
+  severity     TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  detail       TEXT NOT NULL,
+  host_label   TEXT,
+  sample       TEXT,
+  count        INTEGER NOT NULL DEFAULT 0,
+  first_ts     INTEGER NOT NULL,
+  last_ts      INTEGER NOT NULL,
+  acknowledged INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(rule, subject)
+);
+
+CREATE INDEX IF NOT EXISTS idx_threat_last ON threat_finding (last_ts);
+CREATE INDEX IF NOT EXISTS idx_threat_sev  ON threat_finding (severity);
 `;

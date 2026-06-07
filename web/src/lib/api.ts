@@ -5,6 +5,9 @@ import type {
   Filters,
   Meta,
   Overview,
+  ThreatConfig,
+  ThreatConfigResponse,
+  ThreatsResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -66,4 +69,28 @@ export const api = {
     req<{ total: number; limit: number; offset: number; rows: ErrorRow[] }>(
       `/api/errors?${filterParams(f)}&limit=${limit}&offset=${offset}`,
     ),
+
+  threats: (severity?: string, includeAcked = false) => {
+    const p = new URLSearchParams();
+    if (severity) p.set("severity", severity);
+    if (includeAcked) p.set("acked", "1");
+    return req<ThreatsResponse>(`/api/threats?${p.toString()}`);
+  },
+  threatConfig: () => req<ThreatConfigResponse>("/api/threats/config"),
+  saveThreatConfig: (config: ThreatConfig) =>
+    req<{ ok: boolean }>("/api/threats/config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+  ackThreat: (id: number) =>
+    req<{ ok: boolean }>("/api/threats/ack", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    }),
+  ackAllThreats: () => req<{ ok: boolean }>("/api/threats/ack-all", { method: "POST" }),
+  clearThreats: () => req<{ ok: boolean }>("/api/threats/clear", { method: "POST" }),
+  testThreatEmail: () =>
+    req<{ ok: boolean; error?: string }>("/api/threats/test-email", {
+      method: "POST",
+    }),
 };

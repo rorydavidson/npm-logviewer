@@ -9,6 +9,7 @@ import Errors from "./pages/Errors";
 import Live from "./pages/Live";
 import Hosts from "./pages/Hosts";
 import World from "./pages/World";
+import Threats from "./pages/Threats";
 import type { Filters } from "./lib/types";
 
 type AuthState =
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/logs" element={<Logs filters={filters} />} />
         <Route path="/errors" element={<Errors filters={filters} />} />
         <Route path="/live" element={<Live />} />
+        <Route path="/threats" element={<Threats />} />
         <Route
           path="/hosts"
           element={<Hosts filters={filters} setFilters={setFilters} />}

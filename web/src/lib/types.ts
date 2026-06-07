@@ -108,6 +108,58 @@ export interface Meta {
   hosts: HostMeta[];
 }
 
+export type Severity = "info" | "low" | "medium" | "high" | "critical";
+
+export interface RuleConfig {
+  enabled: boolean;
+  severity: Severity;
+  threshold?: number;
+  patterns?: string[];
+}
+
+export interface ThreatConfig {
+  windowMinutes: number;
+  alertEmail: string;
+  alertMinSeverity: Severity;
+  cooldownMinutes: number;
+  rules: Record<string, RuleConfig>;
+}
+
+export interface DetectorMeta {
+  id: string;
+  title: string;
+  description: string;
+  editable: { threshold: boolean; patterns: boolean };
+}
+
+export interface Finding {
+  id: number;
+  rule: string;
+  subject: string;
+  severity: Severity;
+  title: string;
+  detail: string;
+  hostLabel: string | null;
+  sample: string | null;
+  count: number;
+  firstTs: number;
+  lastTs: number;
+  acknowledged: boolean;
+  country: string | null;
+  city: string | null;
+}
+
+export interface ThreatsResponse {
+  counts: Record<Severity, number>;
+  findings: Finding[];
+}
+
+export interface ThreatConfigResponse {
+  config: ThreatConfig;
+  emailConfigured: boolean;
+  detectors: DetectorMeta[];
+}
+
 export interface Filters {
   from: number;
   to: number;

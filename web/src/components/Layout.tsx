@@ -16,6 +16,7 @@ const NAV = [
   { to: "/", label: "Overview", end: true },
   { to: "/hosts", label: "Hosts", end: false },
   { to: "/world", label: "World", end: false },
+  { to: "/threats", label: "Threats", end: false },
   { to: "/logs", label: "Access logs", end: false },
   { to: "/errors", label: "Errors", end: false },
   { to: "/live", label: "Live tail", end: false },
