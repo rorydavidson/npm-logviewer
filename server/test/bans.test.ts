@@ -100,6 +100,21 @@ describe("BanService", () => {
     expect(conf).not.toContain("203.0.113.7");
   });
 
+  it("reconciles the full list to the file (recovery after a failed write)", async () => {
+    // Simulate bans recorded in the DB while the file write was failing.
+    const direct = new BanStore(store.db);
+    direct.add("203.0.113.10", { now: 1 });
+    direct.add("203.0.113.11", { now: 2 });
+    expect(fs.existsSync(path.join(dir, "proxylogs-bans.conf"))).toBe(false);
+
+    // A later sync (e.g. on startup or the periodic reconcile) writes them all.
+    const svc = makeService(store.db, dir, []);
+    await svc.sync();
+    const conf = fs.readFileSync(path.join(dir, "proxylogs-bans.conf"), "utf8");
+    expect(conf).toContain("deny 203.0.113.10;");
+    expect(conf).toContain("deny 203.0.113.11;");
+  });
+
   it("does not rewrite the deny file when the list is unchanged", async () => {
     const svc = makeService(store.db, dir, []);
     await svc.ban("203.0.113.7", { now: 1 });

@@ -287,6 +287,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     return { ok: true };
   });
 
+  // Re-write the nginx deny file from the full list (e.g. after fixing perms).
+  app.post("/api/bans/sync", async () => {
+    await bans.sync();
+    return { ok: true, canWrite: bans.canWrite, canReload: bans.canReload };
+  });
+
   app.post("/api/threats/test-email", async () => {
     const cfg = engine.getConfig();
     if (!cfg.alertEmail) return { ok: false, error: "set an alert email first" };

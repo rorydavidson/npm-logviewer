@@ -108,4 +108,8 @@ export const api = {
     req<{ ok: boolean }>(`/api/bans/${encodeURIComponent(ip)}`, {
       method: "DELETE",
     }),
+  syncBans: () =>
+    req<{ ok: boolean; canWrite: boolean; canReload: boolean }>("/api/bans/sync", {
+      method: "POST",
+    }),
 };

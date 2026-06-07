@@ -54,6 +54,13 @@ export default function Bans() {
     setBans((b) => b.filter((x) => x.ip !== ip));
   };
 
+  const applyNow = async () => {
+    const r = await api.syncBans();
+    setCanWrite(r.canWrite);
+    setCanReload(r.canReload);
+    flash(r.canWrite ? "Deny file rewritten from the full list" : "Still can't write the deny file");
+  };
+
   if (loading) return <Spinner />;
   if (error) return <ErrorBox message={error} />;
 
@@ -72,6 +79,12 @@ export default function Bans() {
           (<code className="mx-1">PUID=0 PGID=0</code>) or fix ownership of the
           mounted <code className="mx-1">nginx/custom</code> directory, then they
           will apply.
+          <button
+            onClick={applyNow}
+            className="ml-2 rounded border border-red-700 px-2 py-0.5 text-xs text-red-200 hover:bg-red-900/40"
+          >
+            Retry now
+          </button>
         </div>
       )}
 

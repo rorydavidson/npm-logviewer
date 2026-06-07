@@ -247,6 +247,8 @@ The **Bans** tab maintains a block list of IPs/CIDRs. ProxyLogs enforces it by w
      Note: mounting the Docker socket grants the container significant host privileges — only do this if you accept that trade-off.
    - **Manual / passive** — leave it off; bans are written to the file and apply on NPM's next reload or restart. The Bans tab shows which mode is active.
 
+ProxyLogs reconciles the deny file with the full ban list on startup and every few minutes, so if a write ever fails (e.g. a permission problem) the file is brought back in sync automatically once the cause is fixed. You can also force it immediately with **Retry now** on the Bans tab. The reconcile is a no-op (no nginx reload) when the file already matches.
+
 > **Behind Cloudflare:** bans match nginx's `$remote_addr`. Unless you have configured NPM to use the real client IP (see the Cloudflare section above), that is the Cloudflare edge IP, so banning would block the CDN, not the visitor. Configure real-IP first for meaningful bans.
 
 ## Security

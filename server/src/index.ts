@@ -62,8 +62,15 @@ async function main(): Promise<void> {
     (msg, extra) => app.log.info({ ...(extra as object) }, msg),
   );
   engine.setBanService(bans);
-  // Keep the nginx snippet in step with the stored list on boot.
+  // Reconcile the nginx snippet with the full stored list on boot, then
+  // periodically. The reconcile is a no-op (no write, no reload) when the file
+  // already matches, so it cheaply self-heals a stale or unwritten file once
+  // permissions are corrected.
   bans.sync().catch((err) => app.log.warn({ err }, "initial ban sync failed"));
+  const banReconcile = setInterval(() => {
+    bans.sync().catch((err) => app.log.warn({ err }, "ban reconcile failed"));
+  }, 5 * 60_000);
+  banReconcile.unref();
 
   const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer, bans };
   await registerRoutes(app, ctx);
