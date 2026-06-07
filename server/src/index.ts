@@ -11,11 +11,18 @@ import { Settings } from "./store/settings.js";
 import { Mailer } from "./threats/mailer.js";
 import { ThreatEngine } from "./threats/engine.js";
 import { registerRoutes, type AppCtx } from "./api/routes.js";
+import { registerSecurityHeaders } from "./security/headers.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+  const app = Fastify({
+    logger: { level: process.env.LOG_LEVEL ?? "info" },
+    // Behind NPM the real client IP comes via X-Forwarded-For; trusting it lets
+    // the login rate limiter key on the actual client rather than the proxy.
+    trustProxy: config.trustProxy,
+  });
 
+  registerSecurityHeaders(app, { hsts: config.secureCookie });
   await app.register(cookie);
 
   const store = new Store(config.stateDbPath);

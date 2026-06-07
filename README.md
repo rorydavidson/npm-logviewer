@@ -80,6 +80,9 @@ All via environment variables:
 | `PUID` / `PGID` | `1000` | User the app runs as. Set both to `0` if NPM's `/data` files are only readable by root, or if you see "unable to open database file". |
 | `RESEND_API_KEY` | _(empty)_ | Resend API key. When set, the Threats tab can email alerts. Empty disables sending. |
 | `ALERT_FROM` | `ProxyLogs <onboarding@resend.dev>` | From address for alert emails. Must be a sender verified in your Resend account (the `onboarding@resend.dev` default only delivers to your own Resend login email). |
+| `TRUST_PROXY` | `true` | Trust `X-Forwarded-For` so the login rate limiter sees the real client IP. Keep `true` behind NPM; set `false` only if the app is exposed directly with no proxy. |
+| `LOGIN_MAX_ATTEMPTS` | `10` | Failed logins per IP allowed within the window before throttling. |
+| `LOGIN_WINDOW_MINUTES` | `15` | Login throttle window. |
 
 ### Troubleshooting
 
@@ -173,6 +176,20 @@ Everything is editable in the UI: enable/disable each rule, change its severity,
 3. Use **Send test email** to confirm delivery.
 
 When findings reach the chosen severity, ProxyLogs sends one bundled email per cycle (respecting the per-rule cooldown) via the Resend HTTP API. No alerting happens until both `RESEND_API_KEY` and an alert email are set.
+
+## Security
+
+The viewer is built to sit on the public internet behind NPM, so it ships with sensible defaults:
+
+- **Authentication** on every API route and page, reusing NPM's credentials (bcrypt verified, NPM DB opened read-only). Constant-time comparison and a dummy hash avoid user-enumeration via timing.
+- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Lax`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS.
+- **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. Keep `TRUST_PROXY=true` so the limit keys on the real visitor, not NPM.
+- **Security headers** on every response: a locked-down same-origin Content-Security-Policy, `X-Frame-Options: DENY` and `frame-ancestors 'none'` (clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and HSTS when served over HTTPS.
+- **Same-origin only** — no CORS is enabled, so other sites cannot read the API from a browser.
+- **Read-only on NPM** — the NPM database is opened read-only and `/data` is mounted read-only; the viewer only ever writes to its own `/state` database.
+- **Input handling** — all SQL uses bound parameters; the threat-config endpoint clamps and whitelists its input. The container runs as a non-root user.
+
+For defence in depth, you can also put the viewer behind an NPM Access List (HTTP basic) or your SSO, and only expose it over HTTPS.
 
 ## Notes and trade-offs
 

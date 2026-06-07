@@ -12,7 +12,9 @@ import type { AccessEntry, ErrorEntry } from "../types.js";
 import type { ThreatEngine } from "../threats/engine.js";
 import type { Mailer } from "../threats/mailer.js";
 import { DETECTORS } from "../threats/detectors.js";
-import type { Severity, ThreatConfig } from "../threats/types.js";
+import { sanitizeThreatConfig } from "../threats/validate.js";
+import type { Severity } from "../threats/types.js";
+import { RateLimiter } from "../security/rateLimit.js";
 
 const COOKIE = "lv_session";
 
@@ -35,6 +37,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   const { config, store, npm, hosts, watcher, engine, mailer } = ctx;
   const db = store.db;
 
+  const loginLimiter = new RateLimiter(
+    config.loginMaxAttempts,
+    config.loginWindowMinutes * 60_000,
+  );
+
   // --- auth gate for everything under /api except login -------------------
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
     if (!req.url.startsWith("/api/")) return;
@@ -50,6 +57,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
 
   // --- auth ----------------------------------------------------------------
   app.post("/api/login", async (req, reply) => {
+    const ip = req.ip || "unknown";
+    if (loginLimiter.isLimited(ip)) {
+      return reply
+        .code(429)
+        .send({ error: "too many login attempts, try again later" });
+    }
+
     const { email, password } = (req.body ?? {}) as {
       email?: string;
       password?: string;
@@ -58,7 +72,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
       return reply.code(400).send({ error: "email and password required" });
     }
     const result = await verifyCredentials(npm, email, password);
-    if (!result.ok) return reply.code(401).send({ error: "invalid credentials" });
+    if (!result.ok) {
+      loginLimiter.record(ip);
+      return reply.code(401).send({ error: "invalid credentials" });
+    }
+    loginLimiter.reset(ip);
 
     const exp = Math.floor(Date.now() / 1000) + config.sessionTtlSeconds;
     const token = createToken(
@@ -221,14 +239,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   }));
 
   app.put("/api/threats/config", async (req, reply) => {
-    const body = req.body as ThreatConfig | undefined;
-    if (!body || typeof body !== "object" || !body.rules) {
+    if (!req.body || typeof req.body !== "object") {
       return reply.code(400).send({ error: "invalid config" });
     }
-    engine.setConfig(body);
+    // Coerce/clamp untrusted input into a safe, well-formed config.
+    const clean = sanitizeThreatConfig(req.body);
+    engine.setConfig(clean);
     // Re-evaluate immediately so the UI reflects the new rules.
     void engine.evaluate();
-    return { ok: true };
+    return { ok: true, config: clean };
   });
 
   app.post("/api/threats/run", async () => {
