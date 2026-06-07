@@ -12,7 +12,7 @@
 
 services:
   logviewer:
-    image: yourname/npm-logviewer:latest   # published image; or build: ./nginx-logviewer
+    image: rorydavidson/npm-logviewer:latest   # published image; or build: ./nginx-logviewer
     container_name: npm-logviewer
     restart: unless-stopped
     depends_on:

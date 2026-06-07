@@ -46,10 +46,10 @@ If NPM ever changes its database schema, the only code that needs updating is `s
 Prebuilt multi-arch images (amd64 + arm64) are published to Docker Hub by CI, so you can pull instead of build:
 
 ```sh
-docker pull yourname/npm-logviewer:latest
+docker pull rorydavidson/npm-logviewer:latest
 ```
 
-Use it in compose with `image: yourname/npm-logviewer:latest` instead of `build:`. Tags: `latest` (default branch), `X.Y.Z` and `X.Y` (on version tags), and a short commit SHA.
+Use it in compose with `image: rorydavidson/npm-logviewer:latest` instead of `build:`. Tags: `latest` (default branch), `X.Y.Z` and `X.Y` (on version tags), and a short commit SHA.
 
 To publish from your own fork, add these in the GitHub repo settings:
 
