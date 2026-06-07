@@ -1,4 +1,4 @@
-# NPM Log Viewer
+# ProxyLogs — NPM Log Viewer
 
 A modern dashboard for the access and error logs that [Nginx Proxy Manager](https://nginxproxymanager.com/) (NPM) writes for each proxy host. It runs as a second container in the same Docker Compose project as NPM, reads the shared `/data` volume, and maps each log file back to its proxy host using NPM's own database. Login reuses your existing NPM credentials.
 
@@ -7,7 +7,8 @@ Nothing is sent anywhere. Geolocation uses a bundled offline database, so the da
 ## What you get
 
 - **Overview**: requests over time (stacked by status class), unique visitors, bandwidth, error rate, success rate, status-code donut, HTTP methods, top paths, top clients, top referrers, top user agents, and a top-countries breakdown.
-- **Hosts**: per proxy host traffic, visitors, errors, error rate, bandwidth, and share of total.
+- **Hosts**: per proxy host traffic, visitors, errors, error rate, bandwidth, and share of total. Click a host to drill the whole dashboard into it.
+- **World**: an offline choropleth of requests by country with a ranked breakdown; click a country to filter everything by it.
 - **Access logs**: searchable, filterable, paginated raw entries.
 - **Errors**: parsed `error.log` entries grouped by host with client, request, and upstream context.
 - **Threats**: background detection of suspicious activity (scanning, brute force, exploit probing, injection payloads, hacking-tool agents, flooding, cross-host scanning, fuzzing, and more), with severities you can tune in the UI and optional email alerts.
@@ -112,7 +113,7 @@ npm run dev
 Tests:
 
 ```sh
-cd server && npm test     # parser, analytics, auth, session, NPM DB reader
+cd server && npm test     # parser, analytics, auth, session, NPM DB, networks, threats, security
 ```
 
 ## Behind Cloudflare (or any reverse proxy): logging the real visitor IP
@@ -186,6 +187,7 @@ The viewer is built to sit on the public internet behind NPM, so it ships with s
 - **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. Keep `TRUST_PROXY=true` so the limit keys on the real visitor, not NPM.
 - **Security headers** on every response: a locked-down same-origin Content-Security-Policy, `X-Frame-Options: DENY` and `frame-ancestors 'none'` (clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and HSTS when served over HTTPS.
 - **Same-origin only** — no CORS is enabled, so other sites cannot read the API from a browser.
+- **Not indexable** — ships a `robots.txt` that disallows everything plus a `noindex` meta tag, so the dashboard stays out of search engines.
 - **Read-only on NPM** — the NPM database is opened read-only and `/data` is mounted read-only; the viewer only ever writes to its own `/state` database.
 - **Input handling** — all SQL uses bound parameters; the threat-config endpoint clamps and whitelists its input. The container runs as a non-root user.
 
@@ -197,3 +199,19 @@ For defence in depth, you can also put the viewer behind an NPM Access List (HTT
 - **Response time** is not charted because NPM's default log format does not record `$request_time`. Bandwidth and status are used as the health signals instead.
 - The parsed-log database grows with traffic; `BACKFILL_DAYS` doubles as a daily retention window so it stays bounded.
 - Requires **Node 24+** at runtime for the built-in `node:sqlite` module. There are no native modules to compile.
+
+## Built with
+
+- Backend: [Fastify](https://fastify.dev/), Node's built-in `node:sqlite`, [geoip-lite](https://github.com/geoip-lite/node-geoip) (offline geolocation), [bcryptjs](https://github.com/dcodeIO/bcrypt.js), [chokidar](https://github.com/paulmillr/chokidar).
+- Frontend: [React](https://react.dev/), [Vite](https://vitejs.dev/), [Tailwind CSS](https://tailwindcss.com/), [Recharts](https://recharts.org/), [react-svg-worldmap](https://github.com/MarcoRapaccini/react-svg-worldmap).
+- Email alerts via the [Resend](https://resend.com/) HTTP API.
+
+## Thanks
+
+Huge thanks to **[Jamie Curnow (jc21)](https://github.com/jc21)** and the contributors behind [Nginx Proxy Manager](https://nginxproxymanager.com/). NPM does the hard work of running the proxy and writing these logs; this project is just a friendly window onto them. If you find NPM useful, consider [supporting it](https://nginxproxymanager.com/).
+
+This is an independent, unofficial companion tool and is not affiliated with or endorsed by the Nginx Proxy Manager project.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
