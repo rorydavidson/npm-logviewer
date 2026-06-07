@@ -92,9 +92,20 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.port, host: config.host });
   app.log.info(
-    { logsDir: config.logsDir, npmDb: config.npmDbPath },
+    {
+      logsDir: config.logsDir,
+      npmDb: config.npmDbPath,
+      siteUrl: config.siteUrl || "(unset)",
+      emailAlerts: config.resendApiKey ? "enabled" : "disabled",
+    },
     "nginx-logviewer ready",
   );
+  if (config.resendApiKey && !config.siteUrl) {
+    app.log.warn(
+      "SITE_URL is not set, so alert emails will not include dashboard links. " +
+        "Add SITE_URL to the container environment (not just .env).",
+    );
+  }
 }
 
 main().catch((err) => {

@@ -348,7 +348,7 @@ function renderHtml(cfg: ThreatConfig, findings: EnrichedFinding[], siteUrl: str
         ? f.targets
             .map(
               (t) =>
-                `<span style="display:inline-block;background:#1f2937;color:#e5e7eb;border-radius:4px;padding:2px 6px;margin:0 4px 4px 0;font-size:12px;">${esc(
+                `<span style="display:inline-block;background:#eef2f7;color:#111827;border:1px solid #cbd5e1;border-radius:4px;padding:2px 6px;margin:0 4px 4px 0;font-size:12px;">${esc(
                   t.label,
                 )} <strong>${t.count}</strong></span>`,
             )

@@ -112,6 +112,12 @@ bind mount with locked-down ownership), set `PUID=0` and `PGID=0` in compose.
 **Empty dashboard / cannot read logs** — the app's user cannot read NPM's `/data`.
 NPM runs as root, so its files may be root-only. Set `PUID=0` `PGID=0` to match.
 
+**Alert emails say "SITE_URL is not set"** — a value in `.env` is only used for
+`${...}` interpolation in compose; it is not passed into the container by itself.
+Make sure the `logviewer` service forwards it, e.g. `SITE_URL: ${SITE_URL}` (or a
+literal `SITE_URL: https://logs.example.com`) under `environment:`, then recreate
+the container. The startup log prints the `siteUrl` it actually loaded.
+
 ## Development
 
 Backend and frontend are separate packages.
