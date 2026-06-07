@@ -58,6 +58,14 @@ export function sanitizeThreatConfig(input: unknown): ThreatConfig {
     windowMinutes: clampInt(raw.windowMinutes, 1, 1440, base.windowMinutes),
     cooldownMinutes: clampInt(raw.cooldownMinutes, 0, 10080, base.cooldownMinutes),
     alertMinFindings: clampInt(raw.alertMinFindings, 1, 1000, base.alertMinFindings),
+    autoBan: {
+      enabled:
+        typeof raw.autoBan?.enabled === "boolean"
+          ? raw.autoBan.enabled
+          : base.autoBan.enabled,
+      minSeverity: asSeverity(raw.autoBan?.minSeverity, base.autoBan.minSeverity),
+      minFindings: clampInt(raw.autoBan?.minFindings, 1, 1000, base.autoBan.minFindings),
+    },
     alertMinSeverity: asSeverity(raw.alertMinSeverity, base.alertMinSeverity),
     alertEmail:
       typeof raw.alertEmail === "string" ? raw.alertEmail.trim().slice(0, 320) : "",

@@ -34,6 +34,12 @@ export interface Config {
   alertFrom: string;
   /** Public base URL of this dashboard, used for links in alert emails. */
   siteUrl: string;
+  /** Directory of NPM custom nginx snippets (where the ban file is written). */
+  nginxCustomDir: string;
+  /** Name of the NPM container, for reloading nginx after a ban change. */
+  npmContainer: string;
+  /** Path to the Docker socket, used only to reload nginx in the NPM container. */
+  dockerSocket: string;
   /** Trust X-Forwarded-* headers (true when behind NPM/a reverse proxy). */
   trustProxy: boolean;
   /** Max failed logins per IP within the window before throttling. */
@@ -78,6 +84,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     resendApiKey: env.RESEND_API_KEY ?? "",
     alertFrom: env.ALERT_FROM ?? "ProxyLogs <onboarding@resend.dev>",
     siteUrl: (env.SITE_URL ?? "").replace(/\/+$/, ""),
+    nginxCustomDir: env.NGINX_CUSTOM_DIR ?? path.join(npmDataDir, "nginx", "custom"),
+    npmContainer: env.NPM_CONTAINER ?? "",
+    dockerSocket: env.DOCKER_SOCKET ?? "/var/run/docker.sock",
     trustProxy: envBool("TRUST_PROXY", true),
     loginMaxAttempts: envInt("LOGIN_MAX_ATTEMPTS", 10),
     loginWindowMinutes: envInt("LOGIN_WINDOW_MINUTES", 15),

@@ -11,6 +11,7 @@ import * as A from "../store/analytics.js";
 import type { AccessEntry, ErrorEntry } from "../types.js";
 import type { ThreatEngine } from "../threats/engine.js";
 import type { Mailer } from "../threats/mailer.js";
+import type { BanService } from "../bans/service.js";
 import { DETECTORS } from "../threats/detectors.js";
 import { sanitizeThreatConfig } from "../threats/validate.js";
 import { geoForSubject, targetsForSubject } from "../threats/enrich.js";
@@ -27,6 +28,7 @@ export interface AppCtx {
   watcher: Watcher;
   engine: ThreatEngine;
   mailer: Mailer;
+  bans: BanService;
 }
 
 function num(v: unknown, fallback: number): number {
@@ -35,7 +37,7 @@ function num(v: unknown, fallback: number): number {
 }
 
 export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise<void> {
-  const { config, store, npm, hosts, watcher, engine, mailer } = ctx;
+  const { config, store, npm, hosts, watcher, engine, mailer, bans } = ctx;
   const db = store.db;
 
   const loginLimiter = new RateLimiter(
@@ -255,6 +257,32 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
 
   app.post("/api/threats/run", async () => {
     await engine.evaluate();
+    return { ok: true };
+  });
+
+  // --- ban list ------------------------------------------------------------
+  app.get("/api/bans", async () => ({
+    canReload: bans.canReload,
+    bans: bans.list().map((b) => ({ ...b, ...geoForSubject(db, b.ip) })),
+  }));
+
+  app.post("/api/bans", async (req, reply) => {
+    const { ip, reason } = (req.body ?? {}) as { ip?: string; reason?: string };
+    if (!ip || typeof ip !== "string") {
+      return reply.code(400).send({ error: "ip required" });
+    }
+    const result = await bans.ban(ip, {
+      reason: typeof reason === "string" ? reason.slice(0, 200) : "manual",
+      auto: false,
+      now: Date.now(),
+    });
+    if (!result.ok) return reply.code(400).send({ error: result.reason });
+    return { ok: true };
+  });
+
+  app.delete("/api/bans/:ip", async (req) => {
+    const { ip } = req.params as { ip: string };
+    await bans.unban(ip);
     return { ok: true };
   });
 

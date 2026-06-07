@@ -82,4 +82,13 @@ CREATE TABLE IF NOT EXISTS threat_finding (
 
 CREATE INDEX IF NOT EXISTS idx_threat_last ON threat_finding (last_ts);
 CREATE INDEX IF NOT EXISTS idx_threat_sev  ON threat_finding (severity);
+
+-- Banned client IPs/CIDRs, written out as an nginx deny snippet.
+CREATE TABLE IF NOT EXISTS banned_ip (
+  ip         TEXT PRIMARY KEY,
+  reason     TEXT NOT NULL DEFAULT '',
+  rule       TEXT,
+  auto       INTEGER NOT NULL DEFAULT 0,
+  created_ts INTEGER NOT NULL
+);
 `;

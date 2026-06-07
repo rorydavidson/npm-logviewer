@@ -12,6 +12,7 @@ Nothing is sent anywhere. Geolocation uses a bundled offline database, so the da
 - **Access logs**: searchable, filterable, paginated raw entries.
 - **Errors**: parsed `error.log` entries grouped by host with client, request, and upstream context.
 - **Threats**: background detection of suspicious activity (scanning, brute force, exploit probing, injection payloads, hacking-tool agents, flooding, cross-host scanning, fuzzing, and more), with severities you can tune in the UI and optional email alerts.
+- **Bans**: a block list of IPs/CIDRs enforced via an nginx `deny` snippet, with manual and automatic banning.
 - **Live tail**: real-time stream of new requests and errors over Server-Sent Events.
 - Filter everything by time range, proxy host, status class, method, and path search.
 
@@ -102,6 +103,9 @@ All via environment variables:
 | `TRUST_PROXY` | `true` | Trust `X-Forwarded-For` so the login rate limiter sees the real client IP. Keep `true` behind NPM; set `false` only if the app is exposed directly with no proxy. |
 | `LOGIN_MAX_ATTEMPTS` | `10` | Failed logins per IP allowed within the window before throttling. |
 | `LOGIN_WINDOW_MINUTES` | `15` | Login throttle window. |
+| `NGINX_CUSTOM_DIR` | `$NPM_DATA/nginx/custom` | Where the ban `deny` snippet is written. Must be NPM's custom-config dir, mounted read-write. |
+| `NPM_CONTAINER` | _(empty)_ | NPM container name. Set it (and mount the Docker socket) to reload nginx automatically when bans change. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket path, used only to reload nginx in the NPM container. |
 
 ### Troubleshooting
 
@@ -210,6 +214,34 @@ When findings reach the chosen severity, ProxyLogs sends one bundled email per c
 **Deep links:** when `SITE_URL` is set, each email links to the Threats tab and, per finding, to the access logs pre-filtered to the offending IP and time window, so you can jump straight to the entry in question.
 
 Alerts are sent as formatted **HTML** (with a plain-text fallback) and include, per finding: severity, rule, source IP and its location, the targeted proxy hosts with counts, hit count, detail, first/last seen, a sample request, and the deep link.
+
+## Banning IPs
+
+The **Bans** tab maintains a block list of IPs/CIDRs. ProxyLogs enforces it by writing an nginx `deny` snippet (`proxylogs-bans.conf`) into NPM's custom-config directory and ensuring NPM includes it in every proxy host. You can ban manually (the **Ban IP** button on a finding, or the Bans tab), or have it happen automatically.
+
+**Auto-ban** (Threats → Settings → "Auto-ban attackers", off by default): when an IP trips at least N distinct findings at or above a chosen severity within the detection window, it is added to the ban list. Trusted (exception-list) and private addresses are never banned, so you cannot lock yourself out — add your own IP to the exceptions first.
+
+### Making bans take effect
+
+1. **Mount NPM's custom dir read-write** so ProxyLogs can write the snippet. Keep `/data` read-only and add a narrow read-write mount just for the custom dir:
+   ```yaml
+       volumes:
+         - ./data:/data:ro
+         - ./data/nginx/custom:/data/nginx/custom:rw
+         - logviewer-state:/state
+   ```
+2. **Reload nginx** so new bans apply. Either:
+   - **Automatic** — set `NPM_CONTAINER` (your NPM service's container name) and mount the Docker socket, and ProxyLogs reloads nginx itself on every change:
+     ```yaml
+         environment:
+           NPM_CONTAINER: npm-app
+         volumes:
+           - /var/run/docker.sock:/var/run/docker.sock
+     ```
+     Note: mounting the Docker socket grants the container significant host privileges — only do this if you accept that trade-off.
+   - **Manual / passive** — leave it off; bans are written to the file and apply on NPM's next reload or restart. The Bans tab shows which mode is active.
+
+> **Behind Cloudflare:** bans match nginx's `$remote_addr`. Unless you have configured NPM to use the real client IP (see the Cloudflare section above), that is the Cloudflare edge IP, so banning would block the CDN, not the visitor. Configure real-IP first for meaningful bans.
 
 ## Security
 

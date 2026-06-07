@@ -123,8 +123,24 @@ export interface ThreatConfig {
   alertMinSeverity: Severity;
   cooldownMinutes: number;
   alertMinFindings: number;
+  autoBan: { enabled: boolean; minSeverity: Severity; minFindings: number };
   exceptions: string[];
   rules: Record<string, RuleConfig>;
+}
+
+export interface Ban {
+  ip: string;
+  reason: string;
+  rule: string | null;
+  auto: boolean;
+  createdTs: number;
+  country: string | null;
+  city: string | null;
+}
+
+export interface BansResponse {
+  canReload: boolean;
+  bans: Ban[];
 }
 
 export interface DetectorMeta {

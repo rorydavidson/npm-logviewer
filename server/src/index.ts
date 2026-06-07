@@ -10,6 +10,10 @@ import { Watcher } from "./ingest/watcher.js";
 import { Settings } from "./store/settings.js";
 import { Mailer } from "./threats/mailer.js";
 import { ThreatEngine } from "./threats/engine.js";
+import { BanStore } from "./bans/store.js";
+import { BanEnforcer } from "./bans/enforcer.js";
+import { BanService } from "./bans/service.js";
+import { ipMatchesAny } from "./ingest/networks.js";
 import { registerRoutes, type AppCtx } from "./api/routes.js";
 import { registerSecurityHeaders } from "./security/headers.js";
 
@@ -43,7 +47,25 @@ async function main(): Promise<void> {
     (id) => hosts.label(id),
   );
 
-  const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer };
+  // Ban list: detection feeds it, an nginx deny snippet enforces it.
+  const banStore = new BanStore(store.db);
+  const banEnforcer = new BanEnforcer({
+    customDir: config.nginxCustomDir,
+    dockerSocket: config.dockerSocket,
+    npmContainer: config.npmContainer,
+    log: (msg, extra) => app.log.info({ ...(extra as object) }, msg),
+  });
+  const bans = new BanService(
+    banStore,
+    banEnforcer,
+    (ip) => ipMatchesAny(ip, engine.getConfig().exceptions ?? []),
+    (msg, extra) => app.log.info({ ...(extra as object) }, msg),
+  );
+  engine.setBanService(bans);
+  // Keep the nginx snippet in step with the stored list on boot.
+  bans.sync().catch((err) => app.log.warn({ err }, "initial ban sync failed"));
+
+  const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer, bans };
   await registerRoutes(app, ctx);
 
   // Serve the built frontend if present (single-container deployment).

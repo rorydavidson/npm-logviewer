@@ -96,6 +96,14 @@ export default function Threats() {
     flash(`${ip} added to exceptions`);
     setTimeout(() => void reload(), 400);
   };
+  const banIp = async (ip: string) => {
+    try {
+      await api.banIp(ip, "manual ban from Threats");
+      flash(`${ip} banned`);
+    } catch (e) {
+      flash(e instanceof Error ? `Ban failed: ${e.message}` : "Ban failed");
+    }
+  };
 
   if (loading) return <Spinner />;
   if (error) return <ErrorBox message={error} />;
@@ -189,13 +197,22 @@ export default function Threats() {
                   last seen {time(f.lastTs)}
                 </span>
                 {f.subject !== "global" && (
-                  <button
-                    onClick={() => trustIp(f.subject)}
-                    title="Add this IP to the exception list"
-                    className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-800"
-                  >
-                    Trust IP
-                  </button>
+                  <>
+                    <button
+                      onClick={() => banIp(f.subject)}
+                      title="Ban this IP (adds an nginx deny rule)"
+                      className="rounded border border-red-900/60 px-2 py-0.5 text-xs text-red-400 hover:bg-red-950/40"
+                    >
+                      Ban IP
+                    </button>
+                    <button
+                      onClick={() => trustIp(f.subject)}
+                      title="Add this IP to the exception list"
+                      className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-800"
+                    >
+                      Trust IP
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => ack(f.id)}
@@ -361,6 +378,63 @@ function SettingsPanel({
         >
           Send test email
         </button>
+      </div>
+
+      {/* Auto-ban */}
+      <div className="mb-4 rounded-lg border border-gray-800 p-3">
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-200">
+          <input
+            type="checkbox"
+            checked={config.autoBan.enabled}
+            onChange={(e) =>
+              onChange({
+                ...config,
+                autoBan: { ...config.autoBan, enabled: e.target.checked },
+              })
+            }
+          />
+          Auto-ban attackers
+        </label>
+        <p className="mt-1 text-xs text-gray-500">
+          When an IP trips enough findings in a window it is added to the ban list
+          (an nginx deny rule). Trusted/private IPs are never banned.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-4">
+          <label className="text-xs text-gray-400">
+            Min severity
+            <select
+              value={config.autoBan.minSeverity}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  autoBan: { ...config.autoBan, minSeverity: e.target.value as Severity },
+                })
+              }
+              className="mt-1 block rounded border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-white"
+            >
+              {SEVERITIES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-gray-400">
+            Distinct findings needed
+            <input
+              type="number"
+              min={1}
+              value={config.autoBan.minFindings}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  autoBan: { ...config.autoBan, minFindings: Number(e.target.value) },
+                })
+              }
+              className="mt-1 block w-24 rounded border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-white"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Exception list */}

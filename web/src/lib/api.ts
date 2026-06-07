@@ -1,5 +1,6 @@
 import type {
   AccessRow,
+  BansResponse,
   CountryStat,
   ErrorRow,
   Filters,
@@ -95,5 +96,16 @@ export const api = {
   testThreatEmail: () =>
     req<{ ok: boolean; error?: string }>("/api/threats/test-email", {
       method: "POST",
+    }),
+
+  bans: () => req<BansResponse>("/api/bans"),
+  banIp: (ip: string, reason?: string) =>
+    req<{ ok: boolean }>("/api/bans", {
+      method: "POST",
+      body: JSON.stringify({ ip, reason }),
+    }),
+  unbanIp: (ip: string) =>
+    req<{ ok: boolean }>(`/api/bans/${encodeURIComponent(ip)}`, {
+      method: "DELETE",
     }),
 };

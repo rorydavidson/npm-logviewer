@@ -4,6 +4,7 @@ import type { Mailer } from "./mailer.js";
 import { DETECTORS, defaultConfig } from "./detectors.js";
 import { ipMatchesAny } from "../ingest/networks.js";
 import { geoForSubject, targetsForSubject, type TargetHost } from "./enrich.js";
+import type { BanService } from "../bans/service.js";
 import {
   SEVERITY_RANK,
   type Finding,
@@ -22,6 +23,7 @@ export class ThreatEngine {
   #onLog: (msg: string, extra?: unknown) => void;
   #siteUrl: string;
   #label: (hostId: number | null) => string;
+  #bans: BanService | null;
 
   constructor(
     db: DB,
@@ -31,6 +33,7 @@ export class ThreatEngine {
     siteUrl = "",
     label: (hostId: number | null) => string = (id) =>
       id === null ? "fallback" : `host-${id}`,
+    bans: BanService | null = null,
   ) {
     this.#db = db;
     this.#settings = settings;
@@ -38,6 +41,7 @@ export class ThreatEngine {
     this.#onLog = onLog;
     this.#siteUrl = siteUrl.replace(/\/+$/, "");
     this.#label = label;
+    this.#bans = bans;
     this.#upsert = db.prepare(`
       INSERT INTO threat_finding
         (rule, subject, severity, title, detail, host_label, sample, count, first_ts, last_ts, acknowledged)
@@ -69,6 +73,10 @@ export class ThreatEngine {
     this.#settings.setJSON(CONFIG_KEY, cfg);
   }
 
+  setBanService(bans: BanService): void {
+    this.#bans = bans;
+  }
+
   start(intervalMs = 60_000): void {
     // Run once shortly after boot, then on the interval.
     setTimeout(() => void this.evaluate(), 5_000).unref();
@@ -92,6 +100,8 @@ export class ThreatEngine {
     if (exceptions.length) this.#purgeExcepted(exceptions);
 
     const alertable: Finding[] = [];
+    // Track every raised finding by subject for the auto-ban decision.
+    const bySubject = new Map<string, { severities: Severity[]; rules: Set<string> }>();
 
     for (const detector of DETECTORS) {
       const rule = cfg.rules[detector.id] ?? detector.defaults;
@@ -119,6 +129,15 @@ export class ThreatEngine {
           count: raw.count,
           ts: to,
         });
+        if (raw.subject !== "global") {
+          let agg = bySubject.get(raw.subject);
+          if (!agg) {
+            agg = { severities: [], rules: new Set() };
+            bySubject.set(raw.subject, agg);
+          }
+          agg.severities.push(rule.severity);
+          agg.rules.add(detector.id);
+        }
         if (
           SEVERITY_RANK[rule.severity] >= SEVERITY_RANK[cfg.alertMinSeverity]
         ) {
@@ -140,7 +159,34 @@ export class ThreatEngine {
       }
     }
 
+    if (cfg.autoBan?.enabled && this.#bans) await this.#maybeAutoBan(cfg, bySubject, to);
     if (alertable.length) await this.#maybeAlert(cfg, alertable, to);
+  }
+
+  /** Auto-ban subjects that meet the configured severity + finding-count bar. */
+  async #maybeAutoBan(
+    cfg: ThreatConfig,
+    bySubject: Map<string, { severities: Severity[]; rules: Set<string> }>,
+    now: number,
+  ): Promise<void> {
+    const bans = this.#bans;
+    if (!bans) return;
+    const minRank = SEVERITY_RANK[cfg.autoBan.minSeverity];
+    for (const [ip, agg] of bySubject) {
+      const peak = Math.max(...agg.severities.map((s) => SEVERITY_RANK[s]));
+      if (peak < minRank) continue;
+      if (agg.rules.size < cfg.autoBan.minFindings) continue;
+      if (bans.has(ip)) continue;
+      const result = await bans.ban(ip, {
+        reason: `auto: ${agg.rules.size} findings (peak ${
+          cfg.autoBan.minSeverity
+        }+)`,
+        rule: [...agg.rules].join(","),
+        auto: true,
+        now,
+      });
+      if (!result.ok) this.#onLog("auto-ban skipped", { ip, reason: result.reason });
+    }
   }
 
   /** Send one bundled email for alertable findings whose rule cooldown elapsed. */

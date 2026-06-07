@@ -27,13 +27,21 @@ services:
       ALERT_FROM: ${ALERT_FROM:-ProxyLogs <onboarding@resend.dev>}
       SITE_URL: ${SITE_URL:-}               # e.g. https://logs.example.com (for email links)
       TZ: ${TZ:-UTC}
+      # IP bans: set the NPM container name (and mount the Docker socket below)
+      # to reload nginx automatically when bans change. Leave unset to apply
+      # bans on NPM's next reload instead.
+      # NPM_CONTAINER: npm-app
       # Runs as uid/gid 1000 by default. If you hit "unable to open database
       # file" or cannot read /data, set these to 0 (root) to match NPM:
       # PUID: 0
       # PGID: 0
     volumes:
       - ./data:/data:ro              # SAME source as NPM's /data mount
+      - ./data/nginx/custom:/data/nginx/custom:rw   # writable: ban deny snippet
       - logviewer-state:/state       # our own writable DB lives here
+      # Optional, for automatic nginx reload on ban changes (grants host
+      # privileges — only enable if you accept that):
+      # - /var/run/docker.sock:/var/run/docker.sock
     # No published ports by default — proxy it through NPM itself (see README).
     # To reach it directly during setup, uncomment:
     # ports:

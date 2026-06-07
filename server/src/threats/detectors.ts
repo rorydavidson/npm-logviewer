@@ -316,6 +316,7 @@ export function defaultConfig(): import("./types.js").ThreatConfig {
     alertMinSeverity: "critical",
     cooldownMinutes: 30,
     alertMinFindings: 1,
+    autoBan: { enabled: false, minSeverity: "critical", minFindings: 2 },
     exceptions: [],
     rules,
   };

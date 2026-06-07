@@ -26,6 +26,14 @@ export interface ThreatConfig {
   cooldownMinutes: number;
   /** Minimum number of qualifying findings in a cycle before an email is sent. */
   alertMinFindings: number;
+  /** Auto-ban behaviour. */
+  autoBan: {
+    enabled: boolean;
+    /** Minimum finding severity that counts toward an auto-ban. */
+    minSeverity: Severity;
+    /** Distinct findings an IP must trigger in a cycle before being banned. */
+    minFindings: number;
+  };
   /** IPs or CIDR ranges to ignore in all detectors (e.g. your own address). */
   exceptions: string[];
   rules: Record<string, RuleConfig>;

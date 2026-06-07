@@ -30,10 +30,13 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}   # optional: threat email alerts
       ALERT_FROM: ${ALERT_FROM:-ProxyLogs <onboarding@resend.dev>}
       SITE_URL: ${SITE_URL:-}               # e.g. https://logs.example.com (for email links)
+      NPM_CONTAINER: npm-app                # enables auto nginx reload on ban changes
       TZ: ${TZ:-UTC}
     volumes:
       - ./data:/data:ro        # shares NPM's logs + database, read-only
+      - ./data/nginx/custom:/data/nginx/custom:rw   # writable: ban deny snippet
       - logviewer-state:/state
+      - /var/run/docker.sock:/var/run/docker.sock   # for nginx reload (host-privileged)
     ports:
       - "8090:8090"            # remove once proxied through NPM
 
