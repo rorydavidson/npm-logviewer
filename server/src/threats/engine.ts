@@ -2,7 +2,7 @@ import type { DB } from "../store/db.js";
 import type { Settings } from "../store/settings.js";
 import type { Mailer } from "./mailer.js";
 import { DETECTORS, defaultConfig } from "./detectors.js";
-import { ipMatchesAny } from "../ingest/networks.js";
+import { classifyIp, ipMatchesAny } from "../ingest/networks.js";
 import { geoForSubject, targetsForSubject, type TargetHost } from "./enrich.js";
 import type { BanService } from "../bans/service.js";
 import {
@@ -116,6 +116,12 @@ export class ThreatEngine {
       for (const raw of raws) {
         // Skip trusted IPs/ranges (e.g. the operator's own address).
         if (raw.subject !== "global" && ipMatchesAny(raw.subject, exceptions)) {
+          continue;
+        }
+        // Never act on Cloudflare edge IPs. If NPM logs the CDN edge instead of
+        // the real visitor (missing CF-Connecting-IP real-IP config), the edge
+        // address is not the attacker — banning it blocks the CDN for everyone.
+        if (raw.subject !== "global" && classifyIp(raw.subject) === "cloudflare") {
           continue;
         }
         this.#upsert.run({

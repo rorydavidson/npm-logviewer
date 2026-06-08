@@ -174,6 +174,18 @@ describe("ThreatEngine", () => {
     expect(engine.listFindings({})).toHaveLength(0);
   });
 
+  it("never raises findings for Cloudflare edge IPs", async () => {
+    // 104.16.0.1 falls in Cloudflare's 104.16.0.0/13 range. If NPM logs the CDN
+    // edge instead of the real visitor, that edge IP must not be acted on.
+    store.insertAccessBatch(
+      Array.from({ length: 40 }, (_, i) =>
+        entry({ status: 404, uri: `/m-${i}`, client: "104.16.0.1" }),
+      ),
+    );
+    await engine.evaluate();
+    expect(engine.listFindings({})).toHaveLength(0);
+  });
+
   it("merges saved config over defaults", () => {
     const cfg = engine.getConfig();
     cfg.rules.scanner404!.threshold = 999;
