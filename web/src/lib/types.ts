@@ -125,7 +125,12 @@ export interface ThreatConfig {
   alertMinSeverity: Severity;
   cooldownMinutes: number;
   alertMinFindings: number;
-  autoBan: { enabled: boolean; minSeverity: Severity; minFindings: number };
+  autoBan: {
+    enabled: boolean;
+    minSeverity: Severity;
+    minFindings: number;
+    minScore: number;
+  };
   exceptions: string[];
   rules: Record<string, RuleConfig>;
 }

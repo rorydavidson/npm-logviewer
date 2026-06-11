@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS access_log (
   host            TEXT NOT NULL,
   uri             TEXT NOT NULL,
   client          TEXT NOT NULL,
+  -- The "actor" behind the client address: the enclosing /64 for IPv6 (one
+  -- household/server, whatever privacy address it rotates to), the address
+  -- itself for IPv4. Computed at ingest; threat detectors group by this.
+  client_net      TEXT,
   bytes           INTEGER NOT NULL DEFAULT 0,
   gzip            REAL,
   sent_to         TEXT,

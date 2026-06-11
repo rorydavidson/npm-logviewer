@@ -98,6 +98,26 @@ describe("detectors", () => {
     const f = DETECTOR_BY_ID.get("scanner404")!.run(store.db, from, to, cfg.rules.scanner404!);
     expect(f).toHaveLength(0);
   });
+
+  it("counts rotating IPv6 addresses in one /64 as a single actor", () => {
+    // Neither address crosses the 30-hit threshold alone; the /64 does.
+    const rows: AccessEntry[] = [];
+    for (let i = 0; i < 20; i++) {
+      rows.push(entry({ status: 404, uri: `/a-${i}`, client: "2a00:23c5:1:2:aaaa::1" }));
+    }
+    for (let i = 0; i < 15; i++) {
+      rows.push(entry({ status: 404, uri: `/b-${i}`, client: "2a00:23c5:1:2:bbbb::2" }));
+    }
+    // A different /64 must not be pulled into the group.
+    rows.push(entry({ status: 404, uri: "/c", client: "2a00:23c5:9:9::1" }));
+    store.insertAccessBatch(rows);
+
+    const f = DETECTOR_BY_ID.get("scanner404")!.run(store.db, from, to, cfg.rules.scanner404!);
+    expect(f).toHaveLength(1);
+    expect(f[0]?.count).toBe(35);
+    // Subject is a representative address from the group.
+    expect(f[0]?.subject).toMatch(/^2a00:23c5:1:2:/);
+  });
 });
 
 describe("ThreatEngine", () => {
