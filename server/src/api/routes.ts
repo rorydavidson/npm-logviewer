@@ -15,6 +15,7 @@ import type { BanService } from "../bans/service.js";
 import { DETECTORS } from "../threats/detectors.js";
 import { sanitizeThreatConfig } from "../threats/validate.js";
 import { geoForSubject, targetsForSubject } from "../threats/enrich.js";
+import { lookupGeo } from "../ingest/geo.js";
 import type { Severity } from "../threats/types.js";
 import { RateLimiter } from "../security/rateLimit.js";
 
@@ -330,6 +331,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
           ...e,
           hostLabel: hosts.label(e.hostId),
           banned: bans.checker()(e.client),
+          // Offline lookup; lets the UI show where the request came from.
+          country: lookupGeo(e.client).country,
         })}\n\n`,
       );
     };

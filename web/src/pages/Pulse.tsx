@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flag } from "../lib/format";
 
 /**
  * Pulse — a live, animated picture of traffic flowing through the proxy.
@@ -19,6 +20,15 @@ interface StreamEvent {
   client: string;
   bytes: number;
   banned: boolean;
+  country: string | null;
+}
+
+/** A launch point on the left edge, flagged with the client's country. */
+interface Origin {
+  /** Lane position 0..1 (same hash as the client's particles). */
+  y01: number;
+  country: string | null;
+  lastTs: number;
 }
 
 interface Particle {
@@ -98,6 +108,8 @@ interface Sim {
   ripples: Ripple[];
   hosts: Map<string, HostNode>;
   hostOrder: string[];
+  /** Recently active clients' launch points, keyed by client address. */
+  origins: Map<string, Origin>;
   /** Rolling window of recent events for the HUD numbers. */
   recent: { ts: number; status: number; client: string; bytes: number; banned: boolean }[];
   buckets: [number, number, number, number][];
@@ -112,6 +124,7 @@ function freshSim(): Sim {
     ripples: [],
     hosts: new Map(),
     hostOrder: [],
+    origins: new Map(),
     recent: [],
     buckets: Array.from({ length: BUCKETS }, () => [0, 0, 0, 0]),
     bucketT0: Date.now(),
@@ -129,9 +142,11 @@ const DEMO_PATHS = [
   "/", "/api/v1/items", "/stream/4123", "/static/app.js", "/login",
   "/api/health", "/img/cover.jpg", "/.env", "/feed.xml", "/api/search?q=tv",
 ];
-const DEMO_CLIENTS = [
-  "203.0.113.7", "198.51.100.23", "2a00:23c5:1234:5678:abcd::1",
-  "92.40.18.6", "2001:db8:7:1::42", "151.101.1.69", "66.249.66.1",
+const DEMO_CLIENTS: Array<[string, string]> = [
+  ["203.0.113.7", "GB"], ["198.51.100.23", "US"],
+  ["2a00:23c5:1234:5678:abcd::1", "GB"], ["92.40.18.6", "GB"],
+  ["2001:db8:7:1::42", "DE"], ["151.101.1.69", "NL"],
+  ["66.249.66.1", "US"], ["103.21.244.9", "SG"], ["45.137.21.50", "RU"],
 ];
 
 function demoEvent(): StreamEvent {
@@ -139,15 +154,17 @@ function demoEvent(): StreamEvent {
   const status =
     r < 0.78 ? 200 : r < 0.86 ? 304 : r < 0.93 ? 404 : r < 0.97 ? 401 : 502;
   const banned = Math.random() < 0.02;
+  const [client, country] = DEMO_CLIENTS[Math.floor(Math.random() * DEMO_CLIENTS.length)]!;
   return {
     ts: Date.now(),
     status,
     method: Math.random() < 0.85 ? "GET" : "POST",
     hostLabel: DEMO_HOSTS[Math.floor(Math.random() * DEMO_HOSTS.length)]!,
     uri: DEMO_PATHS[Math.floor(Math.random() * DEMO_PATHS.length)]!,
-    client: DEMO_CLIENTS[Math.floor(Math.random() * DEMO_CLIENTS.length)]!,
+    client,
     bytes: Math.floor(Math.exp(5 + Math.random() * 6)),
     banned,
+    country,
   };
 }
 
@@ -179,6 +196,7 @@ export default function Pulse() {
     s.recent.push({
       ts: e.ts, status: e.status, client: e.client, bytes: e.bytes, banned: e.banned,
     });
+    s.origins.set(e.client, { y01: lane(e.client), country: e.country, lastTs: e.ts });
 
     // Spectrogram bucket.
     const idx = Math.floor((Date.now() - s.bucketT0) / BUCKET_MS);
@@ -234,6 +252,7 @@ export default function Pulse() {
         client: d.client,
         bytes: d.bytes ?? 0,
         banned: Boolean(d.banned),
+        country: d.country ?? null,
       });
     });
     return () => es.close();
@@ -352,13 +371,17 @@ export default function Pulse() {
         const t = Math.min(p.t, 1);
         // Ease horizontally, drift from the client's lane into the host lane.
         const ease = t * t * (3 - 2 * t);
-        const wasFresh = p.px < 0;
-        p.px = wasFresh ? 24 : p.x;
-        p.py = wasFresh ? 0 : p.y;
-        p.x = 24 + ease * (nodeX - 48);
         const laneY = flightTop + p.startY * (flightBottom - flightTop);
-        p.y = laneY + (targetY - laneY) * ease;
-        if (wasFresh) p.py = p.y;
+        const desired = laneY + (targetY - laneY) * ease;
+        const wasFresh = p.px < 0;
+        // Previous frame's position anchors this frame's streak segment.
+        p.px = wasFresh ? 24 : p.x;
+        p.py = wasFresh ? desired : p.y;
+        p.x = 24 + ease * (nodeX - 48);
+        // Chase the desired height rather than jumping to it, so a target
+        // moving mid-flight (a new host re-spacing the nodes) bends the path
+        // into a curve instead of drawing a right-angle elbow.
+        p.y = wasFresh ? desired : p.y + (desired - p.y) * 0.35;
 
         if (t >= 1) {
           s.ripples.push({ x: nodeX, y: targetY, r: 3, life: 1, color: p.color });
@@ -398,6 +421,23 @@ export default function Pulse() {
       s.ripples = ripples;
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
+
+      // --- origin flags: where each active client launches from -------------
+      ctx.font = "14px sans-serif";
+      ctx.textAlign = "left";
+      for (const [client, o] of s.origins) {
+        const age = now - o.lastTs;
+        if (age > 8_000) {
+          s.origins.delete(client);
+          continue;
+        }
+        if (!o.country) continue; // unknown/private origin: no marker
+        // Hold solid while active, fade over the final three seconds.
+        ctx.globalAlpha = age < 5_000 ? 0.95 : 0.95 * (1 - (age - 5_000) / 3_000);
+        const y = flightTop + o.y01 * (flightBottom - flightTop);
+        ctx.fillText(flag(o.country), 6, y + 5);
+      }
+      ctx.globalAlpha = 1;
 
       // --- host nodes + labels ---------------------------------------------
       ctx.font = `11px ${MONO}`;
@@ -522,7 +562,9 @@ export default function Pulse() {
             <span className="text-gray-500">{last.method}</span>
             <span className="max-w-[40%] truncate text-gray-300">{last.uri}</span>
             <span className="text-gray-600">→ {last.hostLabel}</span>
-            <span className="ml-auto truncate text-gray-600">{last.client}</span>
+            <span className="ml-auto truncate text-gray-600">
+              {flag(last.country)} {last.client}
+            </span>
             {last.banned && (
               <span className="rounded border border-red-900/70 px-1.5 text-[10px] uppercase tracking-widest text-red-400">
                 banned
