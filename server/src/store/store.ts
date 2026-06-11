@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync, type DB } from "./db.js";
 import { SCHEMA } from "./schema.js";
 import { lookupGeo } from "../ingest/geo.js";
+import { ipv6Subnet } from "../ingest/networks.js";
 import type { AccessEntry, ErrorEntry } from "../types.js";
 
 export interface IngestState {
@@ -30,16 +31,17 @@ export class Store {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.exec(SCHEMA);
+    this.#migrate();
 
     this.#insertAccess = this.db.prepare(`
       INSERT INTO access_log
         (host_id, source, ts, status, upstream_status, cache_status, method,
-         scheme, host, uri, client, bytes, gzip, sent_to, user_agent, referer,
-         country, region, city, lat, lon)
+         scheme, host, uri, client, client_net, bytes, gzip, sent_to, user_agent,
+         referer, country, region, city, lat, lon)
       VALUES
         (@hostId, @source, @ts, @status, @upstreamStatus, @cacheStatus, @method,
-         @scheme, @host, @uri, @client, @bytes, @gzip, @sentTo, @userAgent, @referer,
-         @country, @region, @city, @lat, @lon)
+         @scheme, @host, @uri, @client, @clientNet, @bytes, @gzip, @sentTo, @userAgent,
+         @referer, @country, @region, @city, @lat, @lon)
     `);
 
     this.#insertError = this.db.prepare(`
@@ -60,6 +62,48 @@ export class Store {
     `);
   }
 
+  /**
+   * Bring an existing database up to the current schema. Runs on every start
+   * and is a no-op once applied, so upgrades need no operator action.
+   */
+  #migrate(): void {
+    const cols = this.db
+      .prepare(`PRAGMA table_info(access_log)`)
+      .all() as unknown as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "client_net")) {
+      this.db.exec(`ALTER TABLE access_log ADD COLUMN client_net TEXT`);
+    }
+    // Backfill rows ingested before the column existed.
+    const needsBackfill = this.db
+      .prepare(`SELECT 1 FROM access_log WHERE client_net IS NULL LIMIT 1`)
+      .get();
+    if (needsBackfill) {
+      this.db.exec("BEGIN");
+      try {
+        // IPv4 (and anything without a colon) maps to itself — one pass.
+        this.db.exec(
+          `UPDATE access_log SET client_net = client
+            WHERE client_net IS NULL AND client NOT LIKE '%:%'`,
+        );
+        // IPv6 needs the /64 computed in JS; one update per distinct address.
+        const v6 = this.db
+          .prepare(`SELECT DISTINCT client FROM access_log WHERE client_net IS NULL`)
+          .all() as unknown as Array<{ client: string }>;
+        const upd = this.db.prepare(
+          `UPDATE access_log SET client_net = ? WHERE client = ? AND client_net IS NULL`,
+        );
+        for (const { client } of v6) upd.run(ipv6Subnet(client) ?? client, client);
+        this.db.exec("COMMIT");
+      } catch (err) {
+        this.db.exec("ROLLBACK");
+        throw err;
+      }
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_access_client_net ON access_log (client_net, ts)`,
+    );
+  }
+
   insertAccessBatch(entries: AccessEntry[]): void {
     if (entries.length === 0) return;
     this.db.exec("BEGIN");
@@ -78,6 +122,7 @@ export class Store {
           host: e.host,
           uri: e.uri,
           client: e.client,
+          clientNet: ipv6Subnet(e.client) ?? e.client,
           bytes: e.bytes,
           gzip: e.gzip,
           sentTo: e.sentTo,
