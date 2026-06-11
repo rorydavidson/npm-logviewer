@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { BannedBadge, ErrorBox, Panel, SeverityBadge, Spinner } from "../components/ui";
 import { flag, num, time } from "../lib/format";
+import { subnet64 } from "../lib/net";
 import type {
   DetectorMeta,
   Finding,
@@ -89,11 +90,13 @@ export default function Threats() {
   };
   const trustIp = async (ip: string) => {
     if (!config) return;
-    if (config.exceptions.includes(ip)) return;
-    const next = { ...config, exceptions: [...config.exceptions, ip] };
+    // Trust the whole /64 for IPv6: devices rotate addresses within it.
+    const target = subnet64(ip);
+    if (config.exceptions.includes(target)) return;
+    const next = { ...config, exceptions: [...config.exceptions, target] };
     setConfig(next);
     await api.saveThreatConfig(next);
-    flash(`${ip} added to exceptions`);
+    flash(`${target} added to exceptions`);
     setTimeout(() => void reload(), 400);
   };
   const banIp = async (ip: string) => {
@@ -417,8 +420,12 @@ function SettingsPanel({
           Auto-ban attackers
         </label>
         <p className="mt-1 text-xs text-gray-500">
-          When an IP trips enough findings in a window it is added to the ban list
-          (an nginx deny rule). Trusted/private IPs are never banned.
+          An IP is banned (nginx deny rule) only when it trips enough distinct
+          findings <em>and</em> their combined severity score clears the bar
+          (low&nbsp;1 · medium&nbsp;3 · high&nbsp;6 · critical&nbsp;10), so two weak
+          signals never ban anyone. IPv6 attackers are banned as their whole /64.
+          Trusted/private IPs, and clients with an established history of
+          successful traffic (e.g. your own devices), are never auto-banned.
         </p>
         <div className="mt-2 flex flex-wrap gap-4">
           <label className="text-xs text-gray-400">
@@ -455,12 +462,30 @@ function SettingsPanel({
               className="mt-1 block w-24 rounded border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-white"
             />
           </label>
+          <label className="text-xs text-gray-400">
+            Min combined score
+            <input
+              type="number"
+              min={1}
+              value={config.autoBan.minScore}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  autoBan: { ...config.autoBan, minScore: Number(e.target.value) },
+                })
+              }
+              title="Sum of severity weights across distinct findings (low 1, medium 3, high 6, critical 10). Default 12 = roughly one critical plus one medium."
+              className="mt-1 block w-24 rounded border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-white"
+            />
+          </label>
         </div>
       </div>
 
       {/* Exception list */}
       <label className="mb-4 block text-xs text-gray-400">
-        Trusted IPs / ranges (ignored by all rules) — one per line, exact IP or CIDR
+        Trusted IPs / ranges (ignored by all rules) — one per line, exact IP or
+        CIDR. IPv6 ranges work too: add your home prefix (e.g. a /56 or /64) to
+        cover every device on your network, whatever address it rotates to.
         <textarea
           value={config.exceptions.join("\n")}
           onChange={(e) =>
@@ -474,7 +499,7 @@ function SettingsPanel({
           }
           rows={3}
           spellCheck={false}
-          placeholder={"e.g. 203.0.113.5\n10.0.0.0/24"}
+          placeholder={"e.g. 203.0.113.5\n10.0.0.0/24\n2a00:23c5:1234::/56"}
           className="mt-1 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
         />
       </label>
