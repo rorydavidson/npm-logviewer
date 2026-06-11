@@ -346,7 +346,9 @@ describe("auto-ban via the engine", () => {
     );
     const svc = makeService(store.db, dir, []);
     engine.setBanService(svc);
-    // autoBan defaults to disabled.
+    const cfg = engine.getConfig();
+    cfg.autoBan = { ...cfg.autoBan, enabled: false };
+    engine.setConfig(cfg);
 
     const rows = Array.from({ length: 40 }, (_, i) =>
       entry({ status: 404, uri: `/m-${i}`, client: "45.137.21.51" }),

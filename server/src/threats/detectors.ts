@@ -28,7 +28,13 @@ function likeAny(
 
 type Row = { subject: string; count: number; sample: string | null };
 
-/** Group offending requests by client IP, with a sample URI and total count. */
+/**
+ * Group offending requests by actor — the IPv6 /64 or the IPv4 address
+ * (`client_net`, computed at ingest) — so a client rotating privacy addresses
+ * within its prefix cannot dilute counts below a threshold. The subject is a
+ * representative address from the group, which keeps geo lookups and log
+ * links working; the engine re-derives the /64 from it when banning.
+ */
 function byClient(
   db: DB,
   from: number,
@@ -39,10 +45,10 @@ function byClient(
 ): RawFinding[] {
   const rows = db
     .prepare(
-      `SELECT client AS subject, COUNT(*) AS count, MAX(uri) AS sample
+      `SELECT MAX(client) AS subject, COUNT(*) AS count, MAX(uri) AS sample
          FROM access_log
         WHERE ts >= @from AND ts < @to AND client != '' AND ${extraSql}
-        GROUP BY client
+        GROUP BY COALESCE(client_net, client)
        HAVING count >= @threshold
         ORDER BY count DESC
         LIMIT ${SUBJECT_CAP}`,
@@ -199,12 +205,12 @@ export const DETECTORS: Detector[] = [
     run: (db, from, to, cfg) => {
       const rows = db
         .prepare(
-          `SELECT client AS subject,
+          `SELECT MAX(client) AS subject,
                   COUNT(DISTINCT host) AS count,
                   MAX(host) AS sample
              FROM access_log
             WHERE ts >= @from AND ts < @to AND client != ''
-            GROUP BY client
+            GROUP BY COALESCE(client_net, client)
            HAVING count >= @threshold
             ORDER BY count DESC
             LIMIT ${SUBJECT_CAP}`,
@@ -228,12 +234,12 @@ export const DETECTORS: Detector[] = [
     run: (db, from, to, cfg) => {
       const rows = db
         .prepare(
-          `SELECT client AS subject,
+          `SELECT MAX(client) AS subject,
                   COUNT(DISTINCT uri) AS count,
                   MAX(uri) AS sample
              FROM access_log
             WHERE ts >= @from AND ts < @to AND client != '' AND status >= 400
-            GROUP BY client
+            GROUP BY COALESCE(client_net, client)
            HAVING count >= @threshold
             ORDER BY count DESC
             LIMIT ${SUBJECT_CAP}`,
@@ -314,7 +320,9 @@ export function defaultConfig(): import("./types.js").ThreatConfig {
     alertMinSeverity: "critical",
     cooldownMinutes: 30,
     alertMinFindings: 1,
-    autoBan: { enabled: false, minSeverity: "critical", minFindings: 2, minScore: 12 },
+    // Enabled by default: the score gate, good-history guard, trusted ranges,
+    // and private/Cloudflare checks make unattended banning safe to self-run.
+    autoBan: { enabled: true, minSeverity: "critical", minFindings: 2, minScore: 12 },
     exceptions: [],
     rules,
   };

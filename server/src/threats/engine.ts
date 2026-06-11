@@ -223,7 +223,7 @@ export class ThreatEngine {
       if (score < minScore) continue;
       const members = [...agg.members];
       if (members.every((m) => isBanned(m))) continue;
-      if (this.#hasGoodHistory(members, cfg, now)) {
+      if (this.#hasGoodHistory(target, cfg, now)) {
         this.#onLog("auto-ban skipped", {
           ip: target,
           reason: "established history of successful traffic (likely your own client)",
@@ -247,24 +247,23 @@ export class ThreatEngine {
   }
 
   /**
-   * True if these clients had a meaningful volume of mostly-successful
-   * requests in the day *before* the current detection window. The window
-   * itself is excluded so an in-progress flood of 200s cannot vouch for
-   * itself — only prior behaviour counts.
+   * True if this actor (an IPv4 address or a whole IPv6 /64) had a meaningful
+   * volume of mostly-successful requests in the day *before* the current
+   * detection window. The window itself is excluded so an in-progress flood
+   * of 200s cannot vouch for itself — only prior behaviour counts.
    */
-  #hasGoodHistory(members: string[], cfg: ThreatConfig, now: number): boolean {
+  #hasGoodHistory(target: string, cfg: ThreatConfig, now: number): boolean {
     const from = now - GOOD_HISTORY_LOOKBACK_MS;
     const to = now - cfg.windowMinutes * 60_000;
-    if (to <= from || members.length === 0) return false;
-    const placeholders = members.map(() => "?").join(",");
+    if (to <= from) return false;
     const row = this.#db
       .prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status < 400 THEN 1 ELSE 0 END) AS good
            FROM access_log
-          WHERE ts >= ? AND ts < ? AND client IN (${placeholders})`,
+          WHERE client_net = ? AND ts >= ? AND ts < ?`,
       )
-      .get(from, to, ...members) as unknown as { total: number; good: number | null };
+      .get(target, from, to) as unknown as { total: number; good: number | null };
     const good = row?.good ?? 0;
     const total = row?.total ?? 0;
     return good >= GOOD_HISTORY_MIN_REQUESTS && good * 2 >= total;
