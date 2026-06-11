@@ -153,7 +153,7 @@ export const DETECTORS: Detector[] = [
     id: "badAgents",
     title: "Hacking-tool user agents",
     description:
-      "Requests whose user agent matches known scanning/attack tools (sqlmap, nikto, nmap, masscan, etc.) or is empty.",
+      "Requests whose user agent matches known scanning/attack tools (sqlmap, nikto, nmap, masscan, etc.) or is empty. Generic clients like curl are deliberately not listed: health checks, integrations, and your own scripts use them constantly.",
     defaults: {
       enabled: true,
       severity: "high",
@@ -170,8 +170,6 @@ export const DETECTORS: Detector[] = [
         "%wpscan%",
         "%zgrab%",
         "%acunetix%",
-        "%curl/%",
-        "%python-requests%",
       ],
     },
     editable: { threshold: true, patterns: true },
@@ -316,7 +314,7 @@ export function defaultConfig(): import("./types.js").ThreatConfig {
     alertMinSeverity: "critical",
     cooldownMinutes: 30,
     alertMinFindings: 1,
-    autoBan: { enabled: false, minSeverity: "critical", minFindings: 2 },
+    autoBan: { enabled: false, minSeverity: "critical", minFindings: 2, minScore: 12 },
     exceptions: [],
     rules,
   };

@@ -65,6 +65,7 @@ export function sanitizeThreatConfig(input: unknown): ThreatConfig {
           : base.autoBan.enabled,
       minSeverity: asSeverity(raw.autoBan?.minSeverity, base.autoBan.minSeverity),
       minFindings: clampInt(raw.autoBan?.minFindings, 1, 1000, base.autoBan.minFindings),
+      minScore: clampInt(raw.autoBan?.minScore, 1, 1000, base.autoBan.minScore),
     },
     alertMinSeverity: asSeverity(raw.alertMinSeverity, base.alertMinSeverity),
     alertEmail:

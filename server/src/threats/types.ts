@@ -8,6 +8,19 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
+/**
+ * How much each finding contributes to a subject's auto-ban score. The scale
+ * is deliberately non-linear: two weak signals (e.g. an empty user agent plus
+ * a 401 burst) should not add up to the same evidence as one critical hit.
+ */
+export const SEVERITY_WEIGHT: Record<Severity, number> = {
+  info: 0,
+  low: 1,
+  medium: 3,
+  high: 6,
+  critical: 10,
+};
+
 /** Per-rule, user-editable configuration. */
 export interface RuleConfig {
   enabled: boolean;
@@ -33,6 +46,11 @@ export interface ThreatConfig {
     minSeverity: Severity;
     /** Distinct findings an IP must trigger in a cycle before being banned. */
     minFindings: number;
+    /**
+     * Minimum combined severity score (sum of SEVERITY_WEIGHT over distinct
+     * rules) before a ban fires. Stops two weak signals from banning anyone.
+     */
+    minScore: number;
   };
   /** IPs or CIDR ranges to ignore in all detectors (e.g. your own address). */
   exceptions: string[];

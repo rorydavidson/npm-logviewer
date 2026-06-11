@@ -2,17 +2,36 @@ import type { DB } from "../store/db.js";
 import type { Settings } from "../store/settings.js";
 import type { Mailer } from "./mailer.js";
 import { DETECTORS, defaultConfig } from "./detectors.js";
-import { classifyIp, ipMatchesAny } from "../ingest/networks.js";
+import { classifyIp, ipMatchesAny, ipv6Subnet } from "../ingest/networks.js";
 import { geoForSubject, targetsForSubject, type TargetHost } from "./enrich.js";
 import type { BanService } from "../bans/service.js";
 import {
   SEVERITY_RANK,
+  SEVERITY_WEIGHT,
   type Finding,
   type Severity,
   type ThreatConfig,
 } from "./types.js";
 
 const CONFIG_KEY = "threat_config";
+
+/**
+ * Good-history guard for auto-bans: a client with an established record of
+ * mostly-successful requests *before* the current detection window is far more
+ * likely a household device or integration than an attacker (scanners produce
+ * almost nothing but errors). Such clients are never auto-banned — findings
+ * are still raised so the operator can ban manually if it really is hostile.
+ */
+const GOOD_HISTORY_LOOKBACK_MS = 24 * 60 * 60_000;
+const GOOD_HISTORY_MIN_REQUESTS = 25;
+
+/** Per-candidate aggregation used for the auto-ban decision. */
+interface SubjectAgg {
+  /** Highest severity seen per distinct rule. */
+  rules: Map<string, Severity>;
+  /** The individual client addresses behind this candidate (IPv6 /64 groups). */
+  members: Set<string>;
+}
 
 export class ThreatEngine {
   #db: DB;
@@ -65,6 +84,7 @@ export class ThreatEngine {
     return {
       ...base,
       ...saved,
+      autoBan: { ...base.autoBan, ...saved.autoBan },
       rules: { ...base.rules, ...saved.rules },
     };
   }
@@ -100,8 +120,10 @@ export class ThreatEngine {
     if (exceptions.length) this.#purgeExcepted(exceptions);
 
     const alertable: Finding[] = [];
-    // Track every raised finding by subject for the auto-ban decision.
-    const bySubject = new Map<string, { severities: Severity[]; rules: Set<string> }>();
+    // Track raised findings per ban candidate. IPv6 subjects are grouped by
+    // their /64: privacy extensions rotate addresses within that prefix, so
+    // the rotating addresses are one actor, not many.
+    const byCandidate = new Map<string, SubjectAgg>();
 
     for (const detector of DETECTORS) {
       const rule = cfg.rules[detector.id] ?? detector.defaults;
@@ -136,13 +158,17 @@ export class ThreatEngine {
           ts: to,
         });
         if (raw.subject !== "global") {
-          let agg = bySubject.get(raw.subject);
+          const key = ipv6Subnet(raw.subject) ?? raw.subject;
+          let agg = byCandidate.get(key);
           if (!agg) {
-            agg = { severities: [], rules: new Set() };
-            bySubject.set(raw.subject, agg);
+            agg = { rules: new Map(), members: new Set() };
+            byCandidate.set(key, agg);
           }
-          agg.severities.push(rule.severity);
-          agg.rules.add(detector.id);
+          const prev = agg.rules.get(detector.id);
+          if (!prev || SEVERITY_RANK[rule.severity] > SEVERITY_RANK[prev]) {
+            agg.rules.set(detector.id, rule.severity);
+          }
+          agg.members.add(raw.subject);
         }
         if (
           SEVERITY_RANK[rule.severity] >= SEVERITY_RANK[cfg.alertMinSeverity]
@@ -165,37 +191,83 @@ export class ThreatEngine {
       }
     }
 
-    if (cfg.autoBan?.enabled && this.#bans) await this.#maybeAutoBan(cfg, bySubject, to);
+    if (cfg.autoBan?.enabled && this.#bans) await this.#maybeAutoBan(cfg, byCandidate, to);
     if (alertable.length) await this.#maybeAlert(cfg, alertable, to);
   }
 
-  /** Auto-ban subjects that meet the configured severity + finding-count bar. */
+  /**
+   * Auto-ban candidates that meet the configured bar: peak severity, number of
+   * distinct rules, and a combined severity score (so several weak signals
+   * cannot add up to a ban). Candidates with an established good-traffic
+   * history are skipped. IPv6 candidates are banned as their whole /64.
+   */
   async #maybeAutoBan(
     cfg: ThreatConfig,
-    bySubject: Map<string, { severities: Severity[]; rules: Set<string> }>,
+    byCandidate: Map<string, SubjectAgg>,
     now: number,
   ): Promise<void> {
     const bans = this.#bans;
     if (!bans) return;
     const minRank = SEVERITY_RANK[cfg.autoBan.minSeverity];
+    const minScore = cfg.autoBan.minScore ?? 0;
+    // Coverage check (exact or within a banned CIDR) rather than exact-match,
+    // so members of an already-banned /64 are not re-banned every cycle.
+    const isBanned = bans.checker();
     let bannedAny = false;
-    for (const [ip, agg] of bySubject) {
-      const peak = Math.max(...agg.severities.map((s) => SEVERITY_RANK[s]));
+    for (const [target, agg] of byCandidate) {
+      const severities = [...agg.rules.values()];
+      const peak = Math.max(...severities.map((s) => SEVERITY_RANK[s]));
       if (peak < minRank) continue;
       if (agg.rules.size < cfg.autoBan.minFindings) continue;
-      if (bans.has(ip)) continue;
-      const result = await bans.ban(ip, {
-        reason: `auto: ${agg.rules.size} findings (peak ${cfg.autoBan.minSeverity}+)`,
-        rule: [...agg.rules].join(","),
+      const score = severities.reduce((sum, s) => sum + SEVERITY_WEIGHT[s], 0);
+      if (score < minScore) continue;
+      const members = [...agg.members];
+      if (members.every((m) => isBanned(m))) continue;
+      if (this.#hasGoodHistory(members, cfg, now)) {
+        this.#onLog("auto-ban skipped", {
+          ip: target,
+          reason: "established history of successful traffic (likely your own client)",
+        });
+        continue;
+      }
+      const spread =
+        members.length > 1 ? ` across ${members.length} addresses` : "";
+      const result = await bans.ban(target, {
+        reason: `auto: ${agg.rules.size} findings, score ${score}${spread}`,
+        rule: [...agg.rules.keys()].join(","),
         auto: true,
         now,
         deferSync: true, // batch: write the file + reload nginx once below
       });
       if (result.ok) bannedAny = true;
-      else this.#onLog("auto-ban skipped", { ip, reason: result.reason });
+      else this.#onLog("auto-ban skipped", { ip: target, reason: result.reason });
     }
     // One file write + at most one nginx reload per cycle, however many bans.
     if (bannedAny) await bans.sync();
+  }
+
+  /**
+   * True if these clients had a meaningful volume of mostly-successful
+   * requests in the day *before* the current detection window. The window
+   * itself is excluded so an in-progress flood of 200s cannot vouch for
+   * itself — only prior behaviour counts.
+   */
+  #hasGoodHistory(members: string[], cfg: ThreatConfig, now: number): boolean {
+    const from = now - GOOD_HISTORY_LOOKBACK_MS;
+    const to = now - cfg.windowMinutes * 60_000;
+    if (to <= from || members.length === 0) return false;
+    const placeholders = members.map(() => "?").join(",");
+    const row = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN status < 400 THEN 1 ELSE 0 END) AS good
+           FROM access_log
+          WHERE ts >= ? AND ts < ? AND client IN (${placeholders})`,
+      )
+      .get(from, to, ...members) as unknown as { total: number; good: number | null };
+    const good = row?.good ?? 0;
+    const total = row?.total ?? 0;
+    return good >= GOOD_HISTORY_MIN_REQUESTS && good * 2 >= total;
   }
 
   /** Send one bundled email for alertable findings whose rule cooldown elapsed. */
