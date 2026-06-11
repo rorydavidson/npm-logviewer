@@ -17,6 +17,55 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* --- Pulse (live traffic visualisation) atmosphere ----------------------- */
+
+.pulse-grid {
+  background-image: radial-gradient(circle, rgba(56, 189, 248, 0.06) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+.pulse-vignette {
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(2, 4, 10, 0.9) 100%);
+}
+
+.pulse-scanlines {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.022) 0 1px,
+    transparent 1px 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+.pulse-glow-text {
+  text-shadow:
+    0 0 16px rgba(45, 212, 191, 0.45),
+    0 0 2px rgba(45, 212, 191, 0.7);
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(244, 63, 94, 0.7); }
+  50% { opacity: 0.4; box-shadow: none; }
+}
+.pulse-live-dot {
+  animation: pulse-live 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-ticker-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+.pulse-ticker {
+  animation: pulse-ticker-in 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-live-dot,
+  .pulse-ticker {
+    animation: none;
+  }
+}
+
 /* Thin scrollbars for the data tables. */
 * {
   scrollbar-width: thin;
