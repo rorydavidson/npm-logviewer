@@ -14,6 +14,7 @@ Nothing is sent anywhere. Geolocation uses a bundled offline database, so the da
 - **Threats**: background detection of suspicious activity (scanning, brute force, exploit probing, injection payloads, hacking-tool agents, flooding, cross-host scanning, fuzzing, and more), with severities you can tune in the UI and optional email alerts.
 - **Bans**: a block list of IPs/CIDRs enforced via an nginx `deny` snippet, with manual and automatic banning.
 - **Live tail**: real-time stream of new requests and errors over Server-Sent Events.
+- **Pulse**: an animated, real-time picture of traffic. Each request flies as a glowing comet from its client lane into the host node it hit, colour-coded by status class, with a rolling spectrogram, live req/min, error-rate, client and bandwidth counters, and a demo mode for quiet hours. Honours `prefers-reduced-motion`.
 - Filter everything by time range, proxy host, status class, method, and path search.
 
 ## How it works
@@ -202,9 +203,11 @@ The **Threats** tab runs a set of detectors over a rolling window (default 10 mi
 
 Everything is editable in the UI: enable/disable each rule, change its severity, adjust thresholds, and edit the match patterns for the pattern-based rules. Settings persist in the state database.
 
+**IPv6 actors:** detection counts per actor, not per address. IPv6 clients rotate privacy addresses within their /64 prefix, so all addresses in one /64 are treated as a single actor. A scanner cannot dodge a threshold by rotating addresses, and your own devices are judged collectively rather than as a parade of strangers.
+
 Each finding shows the attacker IP (with country flag) and the **proxy hosts it has been hitting**, with per-host counts. Click a target host, or **View logs →**, to jump straight to the matching access-log entries (pre-filtered by IP, time window, and optionally host).
 
-**Exceptions:** add trusted IPs or CIDR ranges (e.g. your own address) so they are ignored by every rule. Use the **Trust IP** button on any finding, or edit the list in Settings. Existing findings for a newly trusted address are removed on the next cycle.
+**Exceptions:** add trusted IPs or CIDR ranges (e.g. your own address) so they are ignored by every rule. Both IPv4 and IPv6 ranges work; add your home delegated prefix (typically a /56 or /48) to cover every device on your network whatever address it rotates to. Use the **Trust IP** button on any finding (for IPv6 it trusts the whole /64), or edit the list in Settings. Existing findings for a newly trusted address are removed on the next cycle.
 
 ### Email alerts (Resend)
 
@@ -225,7 +228,13 @@ Alerts are sent as formatted **HTML** (with a plain-text fallback) and include, 
 
 The **Bans** tab maintains a block list of IPs/CIDRs. ProxyLogs enforces it by writing an nginx `deny` snippet (`proxylogs-bans.conf`) into NPM's custom-config directory and ensuring NPM includes it in every proxy host. You can ban manually (the **Ban IP** button on a finding, or the Bans tab), or have it happen automatically.
 
-**Auto-ban** (Threats → Settings → "Auto-ban attackers", off by default): when an IP trips at least N distinct findings at or above a chosen severity within the detection window, it is added to the ban list. Trusted (exception-list) and private addresses are never banned, so you cannot lock yourself out — add your own IP to the exceptions first.
+**Auto-ban** (Threats → Settings → "Auto-ban attackers", on by default): an actor is banned when, within the detection window, it trips at least N distinct findings, the highest is at or above the chosen severity, **and** their combined severity score clears a bar (weights: low 1, medium 3, high 6, critical 10; default minimum 12). Two weak signals can never add up to a ban. Bare IPv6 targets are banned as their whole /64, since a single-address ban is evaded the moment the client rotates to its next privacy address; unbanning any address in the prefix removes that entry.
+
+Several safeguards mean it will not lock you (or legitimate visitors) out:
+
+- Trusted (exception-list) and private addresses are never banned. Add your own IP or home prefix to the exceptions for a hard guarantee.
+- **Good-history guard:** an actor with a meaningful record of mostly-successful requests in the day before the detection window (a household device, an integration with an expired token) is never auto-banned. Only prior behaviour counts, so an in-progress flood of 200s cannot vouch for itself. The finding still appears, with the skip logged, so you can ban manually if it really is hostile.
+- Cloudflare edge IPs never generate findings or bans (see the Cloudflare section).
 
 ### Making bans take effect
 
@@ -277,7 +286,7 @@ For defence in depth, you can also put the viewer behind an NPM Access List (HTT
 
 Under normal use the impact on NPM is negligible: ProxyLogs reads `/data` and NPM's database read-only on its own connection, and all parsing/queries run in its own container. Things to be aware of over time:
 
-- **Ban list size.** Bans become nginx `deny` rules, which nginx checks per request. A few hundred entries is invisible; tens of thousands (from aggressive long-running auto-ban) add a small per-request cost and slow config reloads. Prefer banning CIDRs over many single IPs, and periodically prune stale bans. Auto-ban is conservative by default (critical + multiple findings) to keep the list small.
+- **Ban list size.** Bans become nginx `deny` rules, which nginx checks per request. A few hundred entries is invisible; tens of thousands (from aggressive long-running auto-ban) add a small per-request cost and slow config reloads. Prefer banning CIDRs over many single IPs, and periodically prune stale bans. Auto-ban is conservative by default (critical severity, multiple findings, and a combined-score bar) and bans IPv6 attackers as one /64 entry rather than one entry per rotating address, which keeps the list small.
 - **nginx reloads.** Ban changes trigger an `nginx -s reload` only when automatic reload is enabled. ProxyLogs batches all of a detection cycle's bans into a single reload, and skips the reload entirely when the rule file is unchanged, so even under sustained attack it reloads at most once per cycle.
 - **Disk.** The parsed-log database grows with traffic but is capped by `BACKFILL_DAYS` (daily prune). It shares the host disk with NPM, so size `BACKFILL_DAYS` to your retention needs and disk.
 

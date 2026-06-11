@@ -7,6 +7,7 @@ import Overview from "./pages/Overview";
 import Logs from "./pages/Logs";
 import Errors from "./pages/Errors";
 import Live from "./pages/Live";
+import Pulse from "./pages/Pulse";
 import Hosts from "./pages/Hosts";
 import World from "./pages/World";
 import Threats from "./pages/Threats";
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="/logs" element={<Logs filters={filters} />} />
         <Route path="/errors" element={<Errors filters={filters} />} />
         <Route path="/live" element={<Live />} />
+        <Route path="/pulse" element={<Pulse />} />
         <Route path="/threats" element={<Threats />} />
         <Route path="/bans" element={<Bans />} />
         <Route

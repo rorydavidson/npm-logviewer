@@ -23,6 +23,7 @@ const NAV = [
   { to: "/logs", label: "Access logs", end: false },
   { to: "/errors", label: "Errors", end: false },
   { to: "/live", label: "Live tail", end: false },
+  { to: "/pulse", label: "Pulse", end: false },
 ];
 
 export default function Layout({
