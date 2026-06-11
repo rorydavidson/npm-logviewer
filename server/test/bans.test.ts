@@ -85,6 +85,26 @@ describe("BanService", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("widens a bare IPv6 ban to its /64 and unbans it the same way", async () => {
+    const svc = makeService(store.db, dir, []);
+    const r = await svc.ban("2a00:23c5:1234:5678:abcd::1", { reason: "test", now: 1 });
+    expect(r.ok).toBe(true);
+    expect(svc.list().map((b) => b.ip)).toEqual(["2a00:23c5:1234:5678::/64"]);
+    const conf = fs.readFileSync(path.join(dir, "proxylogs-bans.conf"), "utf8");
+    expect(conf).toContain("deny 2a00:23c5:1234:5678::/64;");
+
+    // Unbanning any address in the prefix removes the /64 entry.
+    await svc.unban("2a00:23c5:1234:5678:ffff::9");
+    expect(svc.list()).toHaveLength(0);
+  });
+
+  it("refuses to ban an IP inside a trusted IPv6 range", async () => {
+    const svc = makeService(store.db, dir, ["2a00:23c5:1234::/48"]);
+    const r = await svc.ban("2a00:23c5:1234:5678::1", { now: 1 });
+    expect(r.ok).toBe(false);
+    expect(svc.list()).toHaveLength(0);
+  });
+
   it("rejects an invalid target", async () => {
     const svc = makeService(store.db, dir, []);
     const r = await svc.ban("evil; deny all", { now: 1 });
@@ -170,7 +190,7 @@ describe("auto-ban via the engine", () => {
     engine.setBanService(svc);
 
     const cfg = engine.getConfig();
-    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2 };
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2, minScore: 12 };
     engine.setConfig(cfg);
 
     // Attacker: 404 scan (high) + exploit paths (critical) = 2 distinct rules.
@@ -201,7 +221,7 @@ describe("auto-ban via the engine", () => {
     const svc = makeService(store.db, dir, []);
     engine.setBanService(svc);
     const cfg = engine.getConfig();
-    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2 };
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2, minScore: 12 };
     engine.setConfig(cfg);
 
     const rows: AccessEntry[] = [];
@@ -218,6 +238,103 @@ describe("auto-ban via the engine", () => {
     const conf = fs.readFileSync(path.join(dir, "proxylogs-bans.conf"), "utf8");
     expect(conf).toContain("deny 45.137.21.60;");
     expect(conf).toContain("deny 45.137.21.61;");
+  });
+
+  function makeEngine(svc: BanService): ThreatEngine {
+    const engine = new ThreatEngine(
+      store.db,
+      new Settings(store.db),
+      new Mailer({ apiKey: "", from: "x@y.z" }),
+    );
+    engine.setBanService(svc);
+    return engine;
+  }
+
+  it("groups rotating IPv6 addresses by /64 and bans the prefix", async () => {
+    const svc = makeService(store.db, dir, []);
+    const engine = makeEngine(svc);
+    const cfg = engine.getConfig();
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2, minScore: 12 };
+    engine.setConfig(cfg);
+
+    // Two privacy addresses in the same /64, each tripping a different rule.
+    // Individually neither reaches minFindings; as one actor they do.
+    const a = "2a00:23c5:1234:5678:aaaa::1";
+    const b = "2a00:23c5:1234:5678:bbbb::2";
+    const rows: AccessEntry[] = [];
+    for (let i = 0; i < 35; i++) rows.push(entry({ status: 404, uri: `/m-${i}`, client: a }));
+    rows.push(entry({ status: 404, uri: "/.env", client: b }));
+    store.insertAccessBatch(rows);
+
+    await engine.evaluate();
+
+    const banned = svc.list().map((x) => x.ip);
+    expect(banned).toContain("2a00:23c5:1234:5678::/64");
+    // Re-running must not duplicate the ban (members covered by the /64).
+    await engine.evaluate();
+    expect(svc.list()).toHaveLength(1);
+  });
+
+  it("does not ban a trusted IPv6 prefix, whatever address rotates in", async () => {
+    const svc = makeService(store.db, dir, ["2a00:23c5:1234::/48"]);
+    const engine = makeEngine(svc);
+    const cfg = engine.getConfig();
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 1, minScore: 1 };
+    cfg.exceptions = ["2a00:23c5:1234::/48"];
+    engine.setConfig(cfg);
+
+    const rows: AccessEntry[] = [];
+    for (let i = 0; i < 35; i++) {
+      rows.push(entry({ status: 404, uri: `/m-${i}`, client: "2a00:23c5:1234:5678:cccc::9" }));
+    }
+    rows.push(entry({ status: 404, uri: "/.env", client: "2a00:23c5:1234:5678:dddd::3" }));
+    store.insertAccessBatch(rows);
+
+    await engine.evaluate();
+    expect(svc.list()).toHaveLength(0);
+    expect(engine.listFindings({})).toHaveLength(0);
+  });
+
+  it("does not ban when the combined score is below minScore", async () => {
+    const svc = makeService(store.db, dir, []);
+    const engine = makeEngine(svc);
+    const cfg = engine.getConfig();
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2, minScore: 12 };
+    engine.setConfig(cfg);
+
+    // badAgents (high, weight 6) + methodAnomaly (medium, weight 3) = 9 < 12.
+    const ip = "45.137.21.70";
+    store.insertAccessBatch([
+      entry({ userAgent: "", client: ip }),
+      entry({ method: "TRACE", client: ip }),
+    ]);
+
+    await engine.evaluate();
+    expect(svc.list()).toHaveLength(0);
+  });
+
+  it("spares a client with an established history of successful traffic", async () => {
+    const svc = makeService(store.db, dir, []);
+    const engine = makeEngine(svc);
+    const cfg = engine.getConfig();
+    cfg.autoBan = { enabled: true, minSeverity: "high", minFindings: 2, minScore: 12 };
+    engine.setConfig(cfg);
+
+    const homeDevice = "2a00:23c5:9999:1:aaaa::1";
+    const rows: AccessEntry[] = [];
+    // 40 successful requests two hours ago — a normal device on your network.
+    for (let i = 0; i < 40; i++) {
+      rows.push(entry({ ts: Date.now() - 2 * 3600_000, status: 200, client: homeDevice }));
+    }
+    // Now it misbehaves enough to cross the ban bar (expired app token etc.).
+    for (let i = 0; i < 35; i++) {
+      rows.push(entry({ status: 404, uri: `/m-${i}`, client: homeDevice }));
+    }
+    rows.push(entry({ status: 404, uri: "/.env", client: homeDevice }));
+    store.insertAccessBatch(rows);
+
+    await engine.evaluate();
+    expect(svc.list()).toHaveLength(0);
   });
 
   it("does not auto-ban when disabled", async () => {

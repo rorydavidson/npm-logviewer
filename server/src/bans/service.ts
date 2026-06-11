@@ -1,6 +1,6 @@
 import { BanStore, type Ban } from "./store.js";
 import type { BanEnforcer } from "./enforcer.js";
-import { classifyIp, ipMatchesAny } from "../ingest/networks.js";
+import { classifyIp, ipMatchesAny, ipv6Subnet } from "../ingest/networks.js";
 
 export interface BanResult {
   ok: boolean;
@@ -53,12 +53,16 @@ export class BanService {
       deferSync?: boolean;
     },
   ): Promise<BanResult> {
-    const target = ip.trim();
+    let target = ip.trim();
     if (this.#isException(target)) return { ok: false, reason: "IP is on the exception list" };
     // Only refuse to ban plain private addresses (a CIDR is fine).
     if (!target.includes("/") && classifyIp(target) === "private") {
       return { ok: false, reason: "refusing to ban a private address" };
     }
+    // A bare IPv6 address is widened to its /64: clients rotate privacy
+    // addresses within that prefix, so a single-address ban does nothing.
+    // Use an explicit "addr/128" to ban one address only.
+    target = ipv6Subnet(target) ?? target;
     if (!this.#store.add(target, opts)) {
       return { ok: false, reason: "not a valid IP or CIDR" };
     }
@@ -68,7 +72,11 @@ export class BanService {
   }
 
   async unban(ip: string): Promise<void> {
-    this.#store.remove(ip.trim());
+    const target = ip.trim();
+    this.#store.remove(target);
+    // A bare IPv6 address was stored as its /64 — remove that entry too.
+    const net = ipv6Subnet(target);
+    if (net) this.#store.remove(net);
     await this.sync();
   }
 
