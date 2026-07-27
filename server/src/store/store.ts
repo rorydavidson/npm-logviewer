@@ -52,13 +52,13 @@ export class Store {
     `);
 
     this.#getState = this.db.prepare(
-      `SELECT inode, offset, mtime FROM ingest_state WHERE source = ?`,
+      `SELECT offset, mtime FROM ingest_offset WHERE inode = ?`,
     );
     this.#setState = this.db.prepare(`
-      INSERT INTO ingest_state (source, inode, offset, mtime)
-      VALUES (@source, @inode, @offset, @mtime)
-      ON CONFLICT(source) DO UPDATE SET
-        inode = excluded.inode, offset = excluded.offset, mtime = excluded.mtime
+      INSERT INTO ingest_offset (inode, source, offset, mtime)
+      VALUES (@inode, @source, @offset, @mtime)
+      ON CONFLICT(inode) DO UPDATE SET
+        source = excluded.source, offset = excluded.offset, mtime = excluded.mtime
     `);
   }
 
@@ -102,6 +102,29 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_access_client_net ON access_log (client_net, ts)`,
     );
+    this.#migrateIngestState();
+  }
+
+  /**
+   * Move filename-keyed ingest state onto the inode-keyed table. The old
+   * keying re-read a log from byte zero after logrotate renamed it, which
+   * duplicated every row the rotated file still held.
+   */
+  #migrateIngestState(): void {
+    const legacy = this.db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ingest_state'`,
+      )
+      .get();
+    if (!legacy) return;
+    // Ascending offset so the furthest-read row wins each inode.
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO ingest_offset (inode, source, offset, mtime)
+           SELECT inode, source, offset, mtime FROM ingest_state ORDER BY offset ASC`,
+      )
+      .run();
+    this.db.prepare(`DROP TABLE ingest_state`).run();
   }
 
   insertAccessBatch(entries: AccessEntry[]): void {
@@ -166,15 +189,30 @@ export class Store {
     }
   }
 
-  getIngestState(source: string): IngestState | null {
-    const row = this.#getState.get(source) as unknown as
-      | { inode: number; offset: number; mtime: number }
+  /** How far we have read the file with this inode, whatever it is called now. */
+  getIngestState(inode: number): IngestState | null {
+    const row = this.#getState.get(inode) as unknown as
+      | { offset: number; mtime: number }
       | undefined;
-    return row ?? null;
+    return row ? { inode, offset: row.offset, mtime: row.mtime } : null;
   }
 
   setIngestState(source: string, state: IngestState): void {
     this.#setState.run({ source, ...state });
+  }
+
+  /**
+   * Drop rows for log files that no longer exist (rotated away, compressed or
+   * deleted). Keeps the table small and stops a recycled inode from being
+   * mistaken for a file we have already read.
+   */
+  pruneIngestState(liveInodes: number[]): void {
+    const keep = new Set(liveInodes);
+    const rows = this.db
+      .prepare(`SELECT inode FROM ingest_offset`)
+      .all() as unknown as Array<{ inode: number }>;
+    const del = this.db.prepare(`DELETE FROM ingest_offset WHERE inode = ?`);
+    for (const { inode } of rows) if (!keep.has(inode)) del.run(inode);
   }
 
   /** Delete rows older than the given epoch ms. Used for retention. */

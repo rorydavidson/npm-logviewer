@@ -53,9 +53,13 @@ CREATE INDEX IF NOT EXISTS idx_error_level   ON error_log (level);
 
 -- One row per log file, tracking how far we have ingested so restarts and
 -- log rotation are handled without re-reading or dropping lines.
-CREATE TABLE IF NOT EXISTS ingest_state (
-  source TEXT PRIMARY KEY,
-  inode  INTEGER NOT NULL,
+--
+-- Keyed on inode, not filename: logrotate renames the live log (same inode,
+-- new name) and nginx creates a fresh one (same name, new inode), so the inode
+-- is the only stable identity for "the file we have already read this far".
+CREATE TABLE IF NOT EXISTS ingest_offset (
+  inode  INTEGER PRIMARY KEY,
+  source TEXT NOT NULL,
   offset INTEGER NOT NULL,
   mtime  INTEGER NOT NULL
 );

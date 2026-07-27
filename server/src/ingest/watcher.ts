@@ -13,6 +13,15 @@ import type { AccessEntry, ErrorEntry } from "../types.js";
 
 const BUF_LIMIT = 4 * 1024 * 1024; // read at most 4MB per pass per file
 
+/** Inode of a path, or null if it vanished mid-scan. */
+function inodeOf(file: string): number | null {
+  try {
+    return fs.statSync(file).ino;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Watches the NPM logs directory and ingests appended lines into the store.
  *
@@ -46,6 +55,9 @@ export class Watcher extends EventEmitter {
         .readdirSync(this.#logsDir)
         .filter((f) => isAccessLog(f) || isErrorLog(f))
         .map((f) => path.join(this.#logsDir, f));
+      // Forget files that have rotated away, so a recycled inode cannot be
+      // mistaken for one we have already read.
+      this.#store.pruneIngestState(files.map(inodeOf).filter((i) => i !== null));
       for (const f of files) await this.#ingestFile(f);
     }
 
@@ -88,12 +100,11 @@ export class Watcher extends EventEmitter {
     }
     if (!stat.isFile()) return;
 
-    const prev = this.#store.getIngestState(base);
-    let offset = 0;
-    if (prev) {
-      const rotated = prev.inode !== stat.ino || stat.size < prev.offset;
-      offset = rotated ? 0 : prev.offset;
-    }
+    // State is keyed on the inode, so a file renamed by logrotate resumes where
+    // we left off instead of being read again from byte zero. A file that has
+    // shrunk below our offset was truncated in place, so start over.
+    const prev = this.#store.getIngestState(stat.ino);
+    let offset = prev && stat.size >= prev.offset ? prev.offset : 0;
 
     // Loop in case the file is larger than BUF_LIMIT.
     while (offset < stat.size) {
