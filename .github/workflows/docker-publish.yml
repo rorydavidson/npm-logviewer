@@ -82,5 +82,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Refreshes the bundled GeoLite database at build time. Optional:
+          # without the repo secret the build falls back to geoip-lite's own
+          # (older) snapshot.
+          secrets: |
+            maxmind_license_key=${{ secrets.MAXMIND_LICENSE_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

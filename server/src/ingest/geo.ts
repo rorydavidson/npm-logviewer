@@ -1,5 +1,26 @@
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
 import geoip from "geoip-lite";
 import { classifyIp } from "./networks.js";
+
+/**
+ * When the bundled GeoLite database was last written, as an ISO date.
+ *
+ * geoip-lite ships a snapshot frozen at its own publish date and the data ages
+ * badly (addresses get reassigned between countries), so the operator should
+ * be able to see how old theirs is. Refreshed at image build time when a
+ * MaxMind licence key is supplied — see the Dockerfile.
+ */
+export function geoDataDate(): string | null {
+  try {
+    const pkg = createRequire(import.meta.url).resolve("geoip-lite");
+    const dat = path.join(path.dirname(pkg), "..", "data", "geoip-country.dat");
+    return fs.statSync(dat).mtime.toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}
 
 export interface GeoInfo {
   country: string | null;
