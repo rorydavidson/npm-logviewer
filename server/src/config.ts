@@ -62,11 +62,35 @@ function envBool(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
 }
 
+/**
+ * Placeholder secrets that people copy out of the example files and never
+ * change. They are long enough to pass a length check but are public, so a
+ * session cookie signed with one can be forged by anyone — the same as having
+ * no authentication at all. Refuse to start on them.
+ */
+const PLACEHOLDER_SECRET = /change[-_ ]?me|^(your|example|test|dev|insecure|secret|password)[-_]?/i;
+
+/** Reason the given session secret is unusable in production, or null if fine. */
+export function checkSessionSecret(secret: string): string | null {
+  if (secret.trim().length < 16) {
+    return "SESSION_SECRET must be set to at least 16 characters in production";
+  }
+  if (PLACEHOLDER_SECRET.test(secret.trim())) {
+    return (
+      "SESSION_SECRET is still an example placeholder. It is published in this " +
+      "project's docs, so anyone could forge a login session. Generate a real " +
+      "one with: openssl rand -hex 32"
+    );
+  }
+  return null;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const npmDataDir = env.NPM_DATA ?? "/data";
   const sessionSecret = env.SESSION_SECRET ?? "";
-  if (sessionSecret.length < 16 && env.NODE_ENV === "production") {
-    throw new Error("SESSION_SECRET must be set to at least 16 characters in production");
+  if (env.NODE_ENV === "production") {
+    const problem = checkSessionSecret(sessionSecret);
+    if (problem) throw new Error(problem);
   }
 
   return {

@@ -1,6 +1,40 @@
 import { describe, it, expect } from "vitest";
 import { RateLimiter } from "../src/security/rateLimit.js";
 import { sanitizeThreatConfig } from "../src/threats/validate.js";
+import { checkSessionSecret, loadConfig } from "../src/config.js";
+
+describe("session secret guard", () => {
+  it("rejects a missing or short secret", () => {
+    expect(checkSessionSecret("")).toMatch(/at least 16/);
+    expect(checkSessionSecret("tooshort")).toMatch(/at least 16/);
+  });
+
+  it("rejects the placeholders published in the example files", () => {
+    // Long enough to pass a length check, but public — so forgeable.
+    expect(checkSessionSecret("change-me-to-a-long-random-string")).toMatch(
+      /placeholder/,
+    );
+    expect(checkSessionSecret("dev-insecure-secret-change-me")).toMatch(/placeholder/);
+    expect(checkSessionSecret("your-secret-here-goes-now")).toMatch(/placeholder/);
+  });
+
+  it("accepts a generated secret", () => {
+    expect(checkSessionSecret("9f2c1ab4e77d05c3a1b8e6f409d2ccf7")).toBeNull();
+  });
+
+  it("refuses to start in production on a placeholder", () => {
+    const env = {
+      NODE_ENV: "production",
+      SESSION_SECRET: "change-me-to-a-long-random-string",
+    } as NodeJS.ProcessEnv;
+    expect(() => loadConfig(env)).toThrow(/placeholder/);
+  });
+
+  it("leaves development alone", () => {
+    const env = { SESSION_SECRET: "" } as NodeJS.ProcessEnv;
+    expect(() => loadConfig(env)).not.toThrow();
+  });
+});
 
 describe("RateLimiter", () => {
   it("limits after max attempts within the window", () => {
