@@ -14,6 +14,7 @@ import { BanStore } from "./bans/store.js";
 import { BanEnforcer } from "./bans/enforcer.js";
 import { BanService } from "./bans/service.js";
 import { ipMatchesAny } from "./ingest/networks.js";
+import { geoDataDate } from "./ingest/geo.js";
 import { registerRoutes, type AppCtx } from "./api/routes.js";
 import { registerSecurityHeaders } from "./security/headers.js";
 
@@ -126,6 +127,9 @@ async function main(): Promise<void> {
       npmDb: config.npmDbPath,
       siteUrl: config.siteUrl || "(unset)",
       emailAlerts: config.resendApiKey ? "enabled" : "disabled",
+      // File write date: the refresh date when built with a MaxMind licence
+      // key, otherwise just when the image was built.
+      geoipDataWritten: geoDataDate() ?? "(unknown)",
     },
     "nginx-logviewer ready",
   );

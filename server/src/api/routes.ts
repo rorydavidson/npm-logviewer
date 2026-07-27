@@ -46,10 +46,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     config.loginWindowMinutes * 60_000,
   );
 
+  // --- health check (unauthenticated, for Docker/uptime probes) ------------
+  // Deliberately says nothing about the deployment beyond liveness.
+  app.get("/api/health", async () => ({ ok: true }));
+
   // --- auth gate for everything under /api except login -------------------
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
     if (!req.url.startsWith("/api/")) return;
     if (req.url.startsWith("/api/login")) return;
+    if (req.url.startsWith("/api/health")) return;
     const token = req.cookies?.[COOKIE];
     const session = verifyToken(token, config.sessionSecret);
     if (!session) {

@@ -14,7 +14,22 @@ WORKDIR /server
 COPY server/package*.json ./
 RUN npm ci
 COPY server/ ./
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
+
+# geoip-lite ships a GeoLite snapshot frozen at its own publish date, which is
+# already months stale by the time we build. Refresh it when a MaxMind licence
+# key is supplied as a build secret (never written to a layer):
+#   docker build --secret id=maxmind_license_key,env=MAXMIND_LICENSE_KEY .
+# Without a key the build still succeeds on the bundled data.
+RUN --mount=type=secret,id=maxmind_license_key \
+    if [ -s /run/secrets/maxmind_license_key ]; then \
+      LICENSE_KEY="$(cat /run/secrets/maxmind_license_key)" \
+        node node_modules/geoip-lite/scripts/updatedb.js; \
+    else \
+      echo "No MaxMind licence key: using the GeoLite data bundled with geoip-lite."; \
+    fi
+
+RUN npm prune --omit=dev
 
 # --- runtime -----------------------------------------------------------------
 FROM node:24-bookworm-slim AS runtime
@@ -39,6 +54,10 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8090
+
+# Liveness probe so `restart: unless-stopped` can act on a wedged process.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8090)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # node:sqlite is built in; no native modules to compile.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

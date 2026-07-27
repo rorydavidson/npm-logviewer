@@ -93,7 +93,7 @@ All via environment variables:
 | `NPM_DB` | `$NPM_DATA/database.sqlite` | Override the NPM database path. |
 | `STATE_DB` | `/state/logviewer.sqlite` | Where the viewer stores parsed rows. |
 | `BACKFILL_DAYS` | `14` | Days of existing logs to index on first boot, and the retention window. |
-| `SESSION_SECRET` | _(required in prod)_ | Secret for signing session cookies. |
+| `SESSION_SECRET` | _(required in prod)_ | Secret for signing session cookies. Generate your own with `openssl rand -hex 32`. The container refuses to start if it is missing, under 16 characters, or still an example placeholder — a secret published in these docs would let anyone forge a login session. |
 | `SESSION_TTL` | `43200` | Session lifetime in seconds (12h). |
 | `SECURE_COOKIE` | `false` | Set `true` when served over HTTPS. |
 | `PORT` | `8090` | HTTP port. |
@@ -107,6 +107,30 @@ All via environment variables:
 | `NGINX_CUSTOM_DIR` | `$NPM_DATA/nginx/custom` | Where the ban `deny` snippet is written. Must be NPM's custom-config dir, mounted read-write. |
 | `NPM_CONTAINER` | _(empty)_ | NPM container name. Set it (and mount the Docker socket) to reload nginx automatically when bans change. |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket path, used only to reload nginx in the NPM container. |
+
+### Health check
+
+`GET /api/health` returns `{"ok":true}` and needs no authentication, so uptime
+monitors and orchestrators can probe it. The image declares a `HEALTHCHECK`
+against it, which is what makes `restart: unless-stopped` useful when the
+process wedges rather than exits.
+
+### Geolocation data
+
+Geolocation is offline, from the GeoLite snapshot bundled with `geoip-lite`.
+That snapshot is frozen at the library's own publish date and ages badly as
+addresses get reassigned between countries. To build an image with fresh data,
+supply a free [MaxMind licence key](https://www.maxmind.com/en/geolite2/signup)
+as a build secret:
+
+```bash
+MAXMIND_LICENSE_KEY=xxxx docker build --secret id=maxmind_license_key,env=MAXMIND_LICENSE_KEY -t npm-logviewer .
+```
+
+The key is mounted only for that build step and never ends up in a layer.
+Without one the build still works and falls back to the bundled data. The boot
+log reports `geoipDataWritten`, which is the refresh date when a key was used
+and otherwise just the image build date.
 
 ### Troubleshooting
 
@@ -265,7 +289,7 @@ ProxyLogs reconciles the deny file with the full ban list on startup and every f
 The viewer is built to sit on the public internet behind NPM, so it ships with sensible defaults:
 
 - **Authentication** on every API route and page, reusing NPM's credentials (bcrypt verified, NPM DB opened read-only). Constant-time comparison and a dummy hash avoid user-enumeration via timing.
-- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Lax`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS.
+- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Lax`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS. The app refuses to start in production on a missing, short, or placeholder `SESSION_SECRET`, since anyone knowing the signing key can mint a valid session.
 - **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. Keep `TRUST_PROXY=true` so the limit keys on the real visitor, not NPM.
 - **Security headers** on every response: a locked-down same-origin Content-Security-Policy, `X-Frame-Options: DENY` and `frame-ancestors 'none'` (clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and HSTS when served over HTTPS.
 - **Same-origin only** — no CORS is enabled, so other sites cannot read the API from a browser.
