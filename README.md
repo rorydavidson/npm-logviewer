@@ -105,8 +105,8 @@ All via environment variables:
 | `LOGIN_MAX_ATTEMPTS` | `10` | Failed logins per IP allowed within the window before throttling. |
 | `LOGIN_WINDOW_MINUTES` | `15` | Login throttle window. |
 | `NGINX_CUSTOM_DIR` | `$NPM_DATA/nginx/custom` | Where the ban `deny` snippet is written. Must be NPM's custom-config dir, mounted read-write. |
-| `NPM_CONTAINER` | _(empty)_ | NPM container name. Set it (and mount the Docker socket) to reload nginx automatically when bans change. |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket path, used only to reload nginx in the NPM container. |
+| `NPM_CONTAINER` | _(empty)_ | NPM container name. Set it (and provide a filtered Docker socket, see [Making bans take effect](#making-bans-take-effect)) to reload nginx automatically when bans change. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket path, used only to reload nginx in the NPM container. Point it at the `docker-proxy` socket, not the host's. |
 
 ### Health check
 
@@ -270,14 +270,15 @@ Several safeguards mean it will not lock you (or legitimate visitors) out:
          - logviewer-state:/state
    ```
 2. **Reload nginx** so new bans apply. Either:
-   - **Automatic** — set `NPM_CONTAINER` (your NPM service's container name) and mount the Docker socket, and ProxyLogs reloads nginx itself on every change:
+   - **Automatic** — set `NPM_CONTAINER` (your NPM service's container name) and give ProxyLogs a *filtered* Docker socket, and it reloads nginx itself on every change. Use the `docker-proxy` service from [`docker-compose.example.yml`](docker-compose.example.yml): it allows only listing containers and running `nginx -s reload`, and refuses everything else. Then point ProxyLogs at it:
      ```yaml
          environment:
            NPM_CONTAINER: npm-app
+           DOCKER_SOCKET: /run/docker-proxy/docker.sock
          volumes:
-           - /var/run/docker.sock:/var/run/docker.sock
+           - docker-proxy-socket:/run/docker-proxy
      ```
-     Note: mounting the Docker socket grants the container significant host privileges — only do this if you accept that trade-off.
+     Do not mount the real `/var/run/docker.sock` into ProxyLogs. Full Docker API access is equivalent to root on the host, so any bug in the viewer would become a host compromise. Even through the proxy, exec access lets ProxyLogs run commands inside the NPM container, so keep the proxy if you enable this.
    - **Manual / passive** — leave it off; bans are written to the file and apply on NPM's next reload or restart. The Bans tab shows which mode is active.
 
 ProxyLogs reconciles the deny file with the full ban list on startup and every few minutes, so if a write ever fails (e.g. a permission problem) the file is brought back in sync automatically once the cause is fixed. You can also force it immediately with **Retry now** on the Bans tab. The reconcile is a no-op (no nginx reload) when the file already matches.
@@ -289,10 +290,11 @@ ProxyLogs reconciles the deny file with the full ban list on startup and every f
 The viewer is built to sit on the public internet behind NPM, so it ships with sensible defaults:
 
 - **Authentication** on every API route and page, reusing NPM's credentials (bcrypt verified, NPM DB opened read-only). Constant-time comparison and a dummy hash avoid user-enumeration via timing.
-- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Lax`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS. The app refuses to start in production on a missing, short, or placeholder `SESSION_SECRET`, since anyone knowing the signing key can mint a valid session.
+- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Strict`. Logging out ends all of that user's sessions on every device, and disabling or deleting the user in NPM cuts off their dashboard access within a minute. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS. The app refuses to start in production on a missing, short, or placeholder `SESSION_SECRET`, since anyone knowing the signing key can mint a valid session.
 - **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. `TRUST_PROXY` trusts only private-network proxies such as NPM, so the limit keys on the real visitor and a client cannot dodge it by sending its own `X-Forwarded-For`.
 - **Security headers** on every response: a locked-down same-origin Content-Security-Policy, `X-Frame-Options: DENY` and `frame-ancestors 'none'` (clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and HSTS when served over HTTPS.
 - **Same-origin only** — no CORS is enabled, so other sites cannot read the API from a browser.
+- **CSRF protection** — state-changing API requests are refused unless the browser marks them as same-origin (`Sec-Fetch-Site`, or `Origin` on older browsers). SameSite cookies alone would not stop this, because the other hosts NPM proxies usually share the dashboard's parent domain.
 - **Not indexable** — ships a `robots.txt` that disallows everything plus a `noindex` meta tag, so the dashboard stays out of search engines.
 - **Read-only on NPM** — the NPM database is opened read-only and `/data` is mounted read-only; the viewer only ever writes to its own `/state` database.
 - **Input handling** — all SQL uses bound parameters; the threat-config endpoint clamps and whitelists its input. The container runs as a non-root user.

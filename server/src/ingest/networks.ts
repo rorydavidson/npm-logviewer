@@ -241,6 +241,66 @@ export function ipMatchesAny(ip: string, entries: string[]): boolean {
   return false;
 }
 
+interface IpRange {
+  v6: boolean;
+  base: bigint;
+  bits: number;
+}
+
+/** Parse a bare IP or a CIDR into one shape for both families. */
+function parseRange(entry: string): IpRange | null {
+  const [ip = "", bitsStr, extra] = entry.trim().split("/");
+  if (extra !== undefined) return null;
+  const long = ipv4ToLong(ip);
+  const v6 = long === null;
+  const value = v6 ? ipv6ToBigInt(ip) : BigInt(long);
+  if (value === null) return null;
+  const width = v6 ? 128 : 32;
+  const bits = bitsStr === undefined ? width : Number(bitsStr);
+  if (!Number.isInteger(bits) || bits < 0 || bits > width) return null;
+  return { v6, base: value & rangeMask(bits, width), bits };
+}
+
+function rangeMask(bits: number, width: number): bigint {
+  const all = (1n << BigInt(width)) - 1n;
+  return bits === 0 ? 0n : (all << BigInt(width - bits)) & all;
+}
+
+/** Prefix length of an IP or CIDR (32/128 for a bare address), or null. */
+export function prefixLength(entry: string): { v6: boolean; bits: number } | null {
+  const r = parseRange(entry);
+  return r ? { v6: r.v6, bits: r.bits } : null;
+}
+
+/**
+ * True if two IPs/CIDRs share any address. Used to stop a broad ban from
+ * swallowing an excepted or private address that an exact match would miss.
+ */
+export function rangesOverlap(a: string, b: string): boolean {
+  const ra = parseRange(a);
+  const rb = parseRange(b);
+  if (!ra || !rb || ra.v6 !== rb.v6) return false;
+  const mask = rangeMask(Math.min(ra.bits, rb.bits), ra.v6 ? 128 : 32);
+  return (ra.base & mask) === (rb.base & mask);
+}
+
+const PRIVATE_RANGES = [
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "127.0.0.0/8",
+  "100.64.0.0/10",
+  "169.254.0.0/16",
+  "::1/128",
+  "fc00::/7",
+  "fe80::/10",
+];
+
+/** True if an IP or CIDR includes any private, loopback or link-local address. */
+export function overlapsPrivate(entry: string): boolean {
+  return PRIVATE_RANGES.some((r) => rangesOverlap(entry, r));
+}
+
 /** Classify a client IP. */
 export function classifyIp(ip: string): IpClass {
   if (!ip || ip === "-") return "private";

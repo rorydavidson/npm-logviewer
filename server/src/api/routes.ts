@@ -6,6 +6,7 @@ import type { HostMap } from "../npm/hostMap.js";
 import type { Watcher } from "../ingest/watcher.js";
 import { verifyCredentials } from "../auth/auth.js";
 import { createToken, verifyToken, type SessionPayload } from "../auth/session.js";
+import { SessionRevocations, makeActiveUserCheck } from "../auth/revocation.js";
 import { parseFilter } from "./filter.js";
 import * as A from "../store/analytics.js";
 import type { AccessEntry, ErrorEntry } from "../types.js";
@@ -18,6 +19,7 @@ import { geoForSubject, targetsForSubject } from "../threats/enrich.js";
 import { lookupGeo } from "../ingest/geo.js";
 import type { Severity } from "../threats/types.js";
 import { RateLimiter } from "../security/rateLimit.js";
+import { isCrossSiteWrite } from "../security/csrf.js";
 
 const COOKIE = "lv_session";
 
@@ -40,9 +42,31 @@ function num(v: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Parse limit/offset query params into a safe page. Both are clamped because
+ * SQLite treats a negative LIMIT as "no limit", which would return every row.
+ */
+export function pageParams(q: Record<string, string>): { limit: number; offset: number } {
+  const limit = Math.trunc(Math.min(500, Math.max(1, num(q.limit, 100))));
+  const offset = Math.trunc(Math.max(0, num(q.offset, 0)));
+  return { limit, offset };
+}
+
 export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise<void> {
   const { config, store, npm, hosts, watcher, engine, mailer, bans } = ctx;
   const db = store.db;
+
+  const revocations = new SessionRevocations(db);
+  const isActiveUser = makeActiveUserCheck(npm);
+
+  /** Signature, expiry, logout and NPM user status; null if any fails. */
+  const validSession = (token: string | undefined): SessionPayload | null => {
+    const session = verifyToken(token, config.sessionSecret);
+    if (!session) return null;
+    if (revocations.isRevoked(session)) return null;
+    if (!isActiveUser(session.email)) return null;
+    return session;
+  };
 
   const loginLimiter = new RateLimiter(
     config.loginMaxAttempts,
@@ -53,7 +77,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   // Deliberately says nothing about the deployment beyond liveness.
   app.get("/api/health", async () => ({ ok: true }));
 
-  // --- auth gate for everything under /api except the public routes -------
+  // --- CSRF check and auth gate for everything under /api ------------------
   // Decide on the matched route pattern, never the raw URL: the router
   // percent-decodes the path before matching, so "/%61pi/threats" reaches the
   // /api/threats handler while its raw URL does not start with "/api/".
@@ -61,9 +85,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     const route = req.routeOptions.url;
     // No matched route means the not-found handler, which serves no data.
     if (!route || !route.startsWith("/api/")) return;
+    if (isCrossSiteWrite(req.method, req.headers)) {
+      reply.code(403).send({ error: "cross-site request refused" });
+      return reply;
+    }
     if (PUBLIC_ROUTES.has(route)) return;
-    const token = req.cookies?.[COOKIE];
-    const session = verifyToken(token, config.sessionSecret);
+    const session = validSession(req.cookies?.[COOKIE]);
     if (!session) {
       reply.code(401).send({ error: "unauthorised" });
       return reply;
@@ -96,12 +123,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
 
     const exp = Math.floor(Date.now() / 1000) + config.sessionTtlSeconds;
     const token = createToken(
-      { email: result.email!, name: result.name ?? result.email!, exp },
+      { email: result.email!, name: result.name ?? result.email!, exp, iat: Date.now() },
       config.sessionSecret,
     );
     reply.setCookie(COOKIE, token, {
       httpOnly: true,
-      sameSite: "lax",
+      // Strict: the SPA's own API calls are always same-site, and nothing
+      // needs the cookie on a cross-site navigation into the dashboard.
+      sameSite: "strict",
       secure: config.secureCookie,
       path: "/",
       maxAge: config.sessionTtlSeconds,
@@ -109,7 +138,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     return { ok: true, name: result.name, email: result.email };
   });
 
-  app.post("/api/logout", async (_req, reply) => {
+  app.post("/api/logout", async (req, reply) => {
+    const s = (req as FastifyRequest & { session: SessionPayload }).session;
+    revocations.revokeAll(s.email);
     reply.clearCookie(COOKIE, { path: "/" });
     return { ok: true };
   });
@@ -186,8 +217,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   app.get("/api/logs", async (req) => {
     const q = req.query as Record<string, string>;
     const f = parseFilter(q);
-    const limit = Math.min(500, num(q.limit, 100));
-    const offset = Math.max(0, num(q.offset, 0));
+    const { limit, offset } = pageParams(q);
     const page = A.queryAccess(db, f, limit, offset);
     const isBanned = bans.checker();
     return {
@@ -205,8 +235,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   app.get("/api/errors", async (req) => {
     const q = req.query as Record<string, string>;
     const f = parseFilter(q);
-    const limit = Math.min(500, num(q.limit, 100));
-    const offset = Math.max(0, num(q.offset, 0));
+    const { limit, offset } = pageParams(q);
     const page = A.queryErrors(db, f, limit, offset);
     return {
       total: page.total,
@@ -356,7 +385,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     watcher.on("access-entry", onAccess);
     watcher.on("error-entry", onError);
 
-    const ping = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
+    // The auth gate only runs when the stream opens, so re-check the session
+    // on each ping and close the stream once it expires or is revoked.
+    const token = req.cookies?.[COOKIE];
+    const ping = setInterval(() => {
+      if (!validSession(token)) {
+        // Destroying the socket fires the close handlers below, which clean up.
+        req.raw.destroy();
+        return;
+      }
+      reply.raw.write(": ping\n\n");
+    }, 25_000);
     ping.unref();
 
     req.raw.on("close", () => {

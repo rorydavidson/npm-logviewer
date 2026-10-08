@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import { RateLimiter } from "../src/security/rateLimit.js";
+import { isCrossSiteWrite } from "../src/security/csrf.js";
 import { sanitizeThreatConfig } from "../src/threats/validate.js";
 import {
   checkSessionSecret,
@@ -149,5 +150,29 @@ describe("trusted proxies", () => {
 
   it("ignores X-Forwarded-For from a public peer", async () => {
     expect(await clientIp("1.2.3.4", "6.6.6.6")).toBe("1.2.3.4");
+  });
+});
+
+describe("isCrossSiteWrite", () => {
+  const host = "logs.example.com";
+
+  it("never blocks reads", () => {
+    expect(isCrossSiteWrite("GET", { host, "sec-fetch-site": "cross-site" })).toBe(false);
+  });
+
+  it("trusts Sec-Fetch-Site when present", () => {
+    expect(isCrossSiteWrite("POST", { host, "sec-fetch-site": "same-origin" })).toBe(false);
+    expect(isCrossSiteWrite("POST", { host, "sec-fetch-site": "same-site" })).toBe(true);
+    expect(isCrossSiteWrite("DELETE", { host, "sec-fetch-site": "cross-site" })).toBe(true);
+  });
+
+  it("falls back to comparing Origin with Host", () => {
+    expect(isCrossSiteWrite("POST", { host, origin: "https://logs.example.com" })).toBe(false);
+    expect(isCrossSiteWrite("POST", { host, origin: "https://app.example.com" })).toBe(true);
+    expect(isCrossSiteWrite("POST", { host, origin: "null" })).toBe(true);
+  });
+
+  it("lets non-browser clients through", () => {
+    expect(isCrossSiteWrite("POST", { host })).toBe(false);
   });
 });

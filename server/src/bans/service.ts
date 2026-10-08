@@ -1,6 +1,17 @@
-import { BanStore, type Ban } from "./store.js";
+import { BanStore, isValidBanTarget, type Ban } from "./store.js";
 import type { BanEnforcer } from "./enforcer.js";
-import { classifyIp, ipMatchesAny, ipv6Subnet } from "../ingest/networks.js";
+import {
+  classifyIp,
+  ipMatchesAny,
+  ipv6Subnet,
+  overlapsPrivate,
+  prefixLength,
+} from "../ingest/networks.js";
+
+// Narrowest prefix a ban may use. Anything wider risks blocking most of the
+// internet by typo (e.g. 0.0.0.0/0); a v6 /32 is one ISP-sized allocation.
+const MIN_PREFIX_V4 = 8;
+const MIN_PREFIX_V6 = 32;
 
 export interface BanResult {
   ok: boolean;
@@ -10,7 +21,8 @@ export interface BanResult {
 /**
  * Coordinates the ban list and its enforcement, applying safety rules: never
  * ban a private/Docker address or anything on the threat exception list (so you
- * cannot lock yourself out by trusting your own IP).
+ * cannot lock yourself out by trusting your own IP), including via a CIDR that
+ * covers one, and never ban an absurdly broad range.
  */
 export class BanService {
   #store: BanStore;
@@ -53,16 +65,23 @@ export class BanService {
       deferSync?: boolean;
     },
   ): Promise<BanResult> {
-    let target = ip.trim();
-    if (this.#isException(target)) return { ok: false, reason: "IP is on the exception list" };
-    // Only refuse to ban plain private addresses (a CIDR is fine).
-    if (!target.includes("/") && classifyIp(target) === "private") {
-      return { ok: false, reason: "refusing to ban a private address" };
-    }
+    if (!isValidBanTarget(ip)) return { ok: false, reason: "not a valid IP or CIDR" };
     // A bare IPv6 address is widened to its /64: clients rotate privacy
     // addresses within that prefix, so a single-address ban does nothing.
-    // Use an explicit "addr/128" to ban one address only.
-    target = ipv6Subnet(target) ?? target;
+    // Use an explicit "addr/128" to ban one address only. The checks below
+    // run on the widened range, since that is what nginx will deny.
+    const target = ipv6Subnet(ip.trim()) ?? ip.trim();
+
+    const prefix = prefixLength(target);
+    if (prefix && prefix.bits < (prefix.v6 ? MIN_PREFIX_V6 : MIN_PREFIX_V4)) {
+      return { ok: false, reason: "range is too broad to ban" };
+    }
+    if (this.#isException(target)) {
+      return { ok: false, reason: "range includes an address on the exception list" };
+    }
+    if (classifyIp(target) === "private" || overlapsPrivate(target)) {
+      return { ok: false, reason: "refusing to ban a private address" };
+    }
     if (!this.#store.add(target, opts)) {
       return { ok: false, reason: "not a valid IP or CIDR" };
     }
