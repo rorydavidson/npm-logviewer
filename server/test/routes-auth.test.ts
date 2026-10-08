@@ -23,6 +23,13 @@ function fakeCtx(): AppCtx {
   } as unknown as AppCtx;
 }
 
+function validToken(): string {
+  return createToken(
+    { email: "a@b.c", name: "a", exp: Math.floor(Date.now() / 1000) + 60 },
+    SECRET,
+  );
+}
+
 describe("API auth gate", () => {
   let app: FastifyInstance;
 
@@ -51,11 +58,27 @@ describe("API auth gate", () => {
   });
 
   it("allows a request with a valid session", async () => {
-    const token = createToken(
-      { email: "a@b.c", name: "a", exp: Math.floor(Date.now() / 1000) + 60 },
-      SECRET,
-    );
-    const res = await app.inject({ url: "/api/bans", cookies: { lv_session: token } });
+    const res = await app.inject({ url: "/api/bans", cookies: { lv_session: validToken() } });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("refuses a write sent from a sibling subdomain", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/logout",
+      cookies: { lv_session: validToken() },
+      headers: { "sec-fetch-site": "same-site" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("allows a same-origin write", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/logout",
+      cookies: { lv_session: validToken() },
+      headers: { "sec-fetch-site": "same-origin" },
+    });
     expect(res.statusCode).toBe(200);
   });
 

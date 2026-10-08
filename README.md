@@ -289,10 +289,11 @@ ProxyLogs reconciles the deny file with the full ban list on startup and every f
 The viewer is built to sit on the public internet behind NPM, so it ships with sensible defaults:
 
 - **Authentication** on every API route and page, reusing NPM's credentials (bcrypt verified, NPM DB opened read-only). Constant-time comparison and a dummy hash avoid user-enumeration via timing.
-- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Lax`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS. The app refuses to start in production on a missing, short, or placeholder `SESSION_SECRET`, since anyone knowing the signing key can mint a valid session.
+- **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Strict`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS. The app refuses to start in production on a missing, short, or placeholder `SESSION_SECRET`, since anyone knowing the signing key can mint a valid session.
 - **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. `TRUST_PROXY` trusts only private-network proxies such as NPM, so the limit keys on the real visitor and a client cannot dodge it by sending its own `X-Forwarded-For`.
 - **Security headers** on every response: a locked-down same-origin Content-Security-Policy, `X-Frame-Options: DENY` and `frame-ancestors 'none'` (clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and HSTS when served over HTTPS.
 - **Same-origin only** — no CORS is enabled, so other sites cannot read the API from a browser.
+- **CSRF protection** — state-changing API requests are refused unless the browser marks them as same-origin (`Sec-Fetch-Site`, or `Origin` on older browsers). SameSite cookies alone would not stop this, because the other hosts NPM proxies usually share the dashboard's parent domain.
 - **Not indexable** — ships a `robots.txt` that disallows everything plus a `noindex` meta tag, so the dashboard stays out of search engines.
 - **Read-only on NPM** — the NPM database is opened read-only and `/data` is mounted read-only; the viewer only ever writes to its own `/state` database.
 - **Input handling** — all SQL uses bound parameters; the threat-config endpoint clamps and whitelists its input. The container runs as a non-root user.

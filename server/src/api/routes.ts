@@ -18,6 +18,7 @@ import { geoForSubject, targetsForSubject } from "../threats/enrich.js";
 import { lookupGeo } from "../ingest/geo.js";
 import type { Severity } from "../threats/types.js";
 import { RateLimiter } from "../security/rateLimit.js";
+import { isCrossSiteWrite } from "../security/csrf.js";
 
 const COOKIE = "lv_session";
 
@@ -63,7 +64,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   // Deliberately says nothing about the deployment beyond liveness.
   app.get("/api/health", async () => ({ ok: true }));
 
-  // --- auth gate for everything under /api except the public routes -------
+  // --- CSRF check and auth gate for everything under /api ------------------
   // Decide on the matched route pattern, never the raw URL: the router
   // percent-decodes the path before matching, so "/%61pi/threats" reaches the
   // /api/threats handler while its raw URL does not start with "/api/".
@@ -71,6 +72,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     const route = req.routeOptions.url;
     // No matched route means the not-found handler, which serves no data.
     if (!route || !route.startsWith("/api/")) return;
+    if (isCrossSiteWrite(req.method, req.headers)) {
+      reply.code(403).send({ error: "cross-site request refused" });
+      return reply;
+    }
     if (PUBLIC_ROUTES.has(route)) return;
     const token = req.cookies?.[COOKIE];
     const session = verifyToken(token, config.sessionSecret);
@@ -111,7 +116,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     );
     reply.setCookie(COOKIE, token, {
       httpOnly: true,
-      sameSite: "lax",
+      // Strict: the SPA's own API calls are always same-site, and nothing
+      // needs the cookie on a cross-site navigation into the dashboard.
+      sameSite: "strict",
       secure: config.secureCookie,
       path: "/",
       maxAge: config.sessionTtlSeconds,
