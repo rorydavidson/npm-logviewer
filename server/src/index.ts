@@ -13,7 +13,7 @@ import { ThreatEngine } from "./threats/engine.js";
 import { BanStore } from "./bans/store.js";
 import { BanEnforcer } from "./bans/enforcer.js";
 import { BanService } from "./bans/service.js";
-import { ipMatchesAny } from "./ingest/networks.js";
+import { rangesOverlap } from "./ingest/networks.js";
 import { geoDataDate } from "./ingest/geo.js";
 import { registerRoutes, type AppCtx } from "./api/routes.js";
 import { registerSecurityHeaders } from "./security/headers.js";
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const bans = new BanService(
     banStore,
     banEnforcer,
-    (ip) => ipMatchesAny(ip, engine.getConfig().exceptions ?? []),
+    (target) => (engine.getConfig().exceptions ?? []).some((e) => rangesOverlap(target, e)),
     (msg, extra) => app.log.info({ ...(extra as object) }, msg),
   );
   engine.setBanService(bans);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyIp, ipMatchesAny, ipv6Subnet } from "../src/ingest/networks.js";
+import { classifyIp, ipMatchesAny, ipv6Subnet, rangesOverlap } from "../src/ingest/networks.js";
 import { lookupGeo } from "../src/ingest/geo.js";
 
 describe("classifyIp", () => {
@@ -85,5 +85,19 @@ describe("lookupGeo skips proxies and private IPs", () => {
   });
   it("does not geolocate a private IP", () => {
     expect(lookupGeo("172.18.0.2").country).toBeNull();
+  });
+});
+
+describe("rangesOverlap", () => {
+  it("detects containment and overlap in both directions", () => {
+    expect(rangesOverlap("8.8.0.0/16", "8.8.8.8")).toBe(true);
+    expect(rangesOverlap("8.8.8.8", "8.8.0.0/16")).toBe(true);
+    expect(rangesOverlap("8.8.0.0/16", "8.9.0.0/16")).toBe(false);
+    expect(rangesOverlap("2001:db8::/32", "2001:db8:1::5")).toBe(true);
+  });
+
+  it("never matches across families or on junk", () => {
+    expect(rangesOverlap("0.0.0.0/0", "::/0")).toBe(false);
+    expect(rangesOverlap("not-an-ip", "1.2.3.4")).toBe(false);
   });
 });

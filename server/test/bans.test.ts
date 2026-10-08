@@ -9,7 +9,7 @@ import { ThreatEngine } from "../src/threats/engine.js";
 import { BanStore, isValidBanTarget } from "../src/bans/store.js";
 import { BanEnforcer } from "../src/bans/enforcer.js";
 import { BanService } from "../src/bans/service.js";
-import { ipMatchesAny } from "../src/ingest/networks.js";
+import { rangesOverlap } from "../src/ingest/networks.js";
 import type { AccessEntry } from "../src/types.js";
 
 describe("isValidBanTarget", () => {
@@ -25,6 +25,13 @@ describe("isValidBanTarget", () => {
     expect(isValidBanTarget("10.0.0.0/99")).toBe(false);
     expect(isValidBanTarget("")).toBe(false);
     expect(isValidBanTarget("deny all;")).toBe(false);
+  });
+  it("rejects malformed IPv6 that nginx would refuse to load", () => {
+    expect(isValidBanTarget("abc:")).toBe(false);
+    expect(isValidBanTarget(":::::")).toBe(false);
+    expect(isValidBanTarget("fe80::1%eth0")).toBe(false);
+    expect(isValidBanTarget("2001:db8::/129")).toBe(false);
+    expect(isValidBanTarget("1.2.3.4/ 8")).toBe(false);
   });
 });
 
@@ -42,7 +49,8 @@ function makeService(db: import("../src/store/db.js").DB, customDir: string, exc
   const service = new BanService(
     new BanStore(db),
     enforcer,
-    (ip) => ipMatchesAny(ip, exceptions),
+    // Same wiring as index.ts: the target may be a range, so test overlap.
+    (target) => exceptions.some((e) => rangesOverlap(target, e)),
   );
   return service;
 }
@@ -103,6 +111,26 @@ describe("BanService", () => {
     const r = await svc.ban("2a00:23c5:1234:5678::1", { now: 1 });
     expect(r.ok).toBe(false);
     expect(svc.list()).toHaveLength(0);
+  });
+
+  it("refuses a CIDR that covers an excepted address", async () => {
+    const svc = makeService(store.db, dir, ["8.8.8.8"]);
+    const r = await svc.ban("8.8.0.0/16", { now: 1 });
+    expect(r.ok).toBe(false);
+    expect(svc.list()).toHaveLength(0);
+  });
+
+  it("refuses ranges that are too broad or include private addresses", async () => {
+    const svc = makeService(store.db, dir, []);
+    expect((await svc.ban("0.0.0.0/0", { now: 1 })).ok).toBe(false);
+    expect((await svc.ban("2000::/3", { now: 1 })).ok).toBe(false);
+    expect((await svc.ban("172.0.0.0/8", { now: 1 })).ok).toBe(false);
+    expect(svc.list()).toHaveLength(0);
+  });
+
+  it("still bans an ordinary public range", async () => {
+    const svc = makeService(store.db, dir, []);
+    expect((await svc.ban("45.0.0.0/16", { now: 1 })).ok).toBe(true);
   });
 
   it("rejects an invalid target", async () => {

@@ -1,3 +1,4 @@
+import net from "node:net";
 import type { DB } from "../store/db.js";
 
 export interface Ban {
@@ -8,37 +9,32 @@ export interface Ban {
   createdTs: number;
 }
 
-const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const IPV6 = /^[0-9a-fA-F:]+$/;
+// net.isIPv6 also accepts zone ids such as "fe80::1%eth0"; nginx does not.
+const IPV6_CHARS = /^[0-9a-fA-F:.]+$/;
 
 /**
  * Strictly validate a ban target before it can ever reach the nginx config
  * file. Only well-formed IPv4/IPv6 addresses or CIDR ranges are allowed — this
- * prevents any log-derived string from injecting nginx directives.
+ * prevents any log-derived string from injecting nginx directives, and keeps
+ * out malformed addresses that nginx would refuse to load (which would stop
+ * NPM from starting on its next restart).
  */
 export function isValidBanTarget(value: string): boolean {
   const s = value.trim();
   if (!s || s.length > 64) return false;
-  const [addr, mask, extra] = s.split("/");
+  const [addr = "", mask, extra] = s.split("/");
   if (extra !== undefined) return false;
 
-  if (addr && IPV4.test(addr)) {
-    if (addr.split(".").some((o) => Number(o) > 255)) return false;
-    if (mask !== undefined) {
-      const m = Number(mask);
-      if (!Number.isInteger(m) || m < 0 || m > 32) return false;
-    }
-    return true;
+  let width: number;
+  if (net.isIPv4(addr)) width = 32;
+  else if (net.isIPv6(addr) && IPV6_CHARS.test(addr)) width = 128;
+  else return false;
+
+  if (mask !== undefined) {
+    if (!/^\d{1,3}$/.test(mask)) return false;
+    if (Number(mask) > width) return false;
   }
-  // IPv6: keep it conservative — hex/colon only, optional /0-128.
-  if (addr && addr.includes(":") && IPV6.test(addr)) {
-    if (mask !== undefined) {
-      const m = Number(mask);
-      if (!Number.isInteger(m) || m < 0 || m > 128) return false;
-    }
-    return true;
-  }
-  return false;
+  return true;
 }
 
 export class BanStore {
