@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
-import { registerRoutes, type AppCtx } from "../src/api/routes.js";
+import { registerRoutes, pageParams, type AppCtx } from "../src/api/routes.js";
 import { createToken } from "../src/auth/session.js";
 import type { Config } from "../src/config.js";
 
@@ -62,5 +62,19 @@ describe("API auth gate", () => {
   it("leaves the health check public", async () => {
     const res = await app.inject({ url: "/api/health" });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe("pageParams", () => {
+  it("clamps limit to 1..500 so a negative value cannot lift the limit", () => {
+    expect(pageParams({ limit: "-1" }).limit).toBe(1);
+    expect(pageParams({ limit: "100000" }).limit).toBe(500);
+    expect(pageParams({ limit: "2.7" }).limit).toBe(2);
+    expect(pageParams({}).limit).toBe(100);
+  });
+
+  it("never returns a negative offset", () => {
+    expect(pageParams({ offset: "-50" }).offset).toBe(0);
+    expect(pageParams({ offset: "abc" }).offset).toBe(0);
   });
 });

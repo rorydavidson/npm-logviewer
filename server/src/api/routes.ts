@@ -40,6 +40,16 @@ function num(v: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Parse limit/offset query params into a safe page. Both are clamped because
+ * SQLite treats a negative LIMIT as "no limit", which would return every row.
+ */
+export function pageParams(q: Record<string, string>): { limit: number; offset: number } {
+  const limit = Math.trunc(Math.min(500, Math.max(1, num(q.limit, 100))));
+  const offset = Math.trunc(Math.max(0, num(q.offset, 0)));
+  return { limit, offset };
+}
+
 export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise<void> {
   const { config, store, npm, hosts, watcher, engine, mailer, bans } = ctx;
   const db = store.db;
@@ -186,8 +196,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   app.get("/api/logs", async (req) => {
     const q = req.query as Record<string, string>;
     const f = parseFilter(q);
-    const limit = Math.min(500, num(q.limit, 100));
-    const offset = Math.max(0, num(q.offset, 0));
+    const { limit, offset } = pageParams(q);
     const page = A.queryAccess(db, f, limit, offset);
     const isBanned = bans.checker();
     return {
@@ -205,8 +214,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   app.get("/api/errors", async (req) => {
     const q = req.query as Record<string, string>;
     const f = parseFilter(q);
-    const limit = Math.min(500, num(q.limit, 100));
-    const offset = Math.max(0, num(q.offset, 0));
+    const { limit, offset } = pageParams(q);
     const page = A.queryErrors(db, f, limit, offset);
     return {
       total: page.total,
