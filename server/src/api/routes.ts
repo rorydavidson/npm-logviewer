@@ -107,11 +107,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
         .send({ error: "too many login attempts, try again later" });
     }
 
-    const { email, password } = (req.body ?? {}) as {
-      email?: string;
-      password?: string;
-    };
-    if (!email || !password) {
+    // The body is untrusted JSON: a non-string here used to reach the SQLite
+    // bind and bcrypt and surface as a 500.
+    const { email, password } = (req.body ?? {}) as Record<string, unknown>;
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      !email ||
+      !password ||
+      email.length > 320 ||
+      password.length > 1024
+    ) {
       return reply.code(400).send({ error: "email and password required" });
     }
     const result = await verifyCredentials(npm, email, password);

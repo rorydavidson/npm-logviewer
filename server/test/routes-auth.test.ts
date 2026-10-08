@@ -22,7 +22,13 @@ function fakeCtx(): AppCtx {
   return {
     config,
     store: new Store(":memory:"),
-    npm: { findUserByEmail: (email: string) => (activeUsers.has(email) ? { email } : null) },
+    npm: {
+      findUserByEmail: (email: unknown) => {
+        // Like node:sqlite, which throws when binding a non-primitive.
+        if (typeof email !== "string") throw new TypeError("cannot bind value");
+        return activeUsers.has(email) ? { email } : null;
+      },
+    },
     bans: { canReload: false, canWrite: false, list: () => [] },
   } as unknown as AppCtx;
 }
@@ -84,6 +90,18 @@ describe("API auth gate", () => {
       headers: { "sec-fetch-site": "same-origin" },
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it.each([
+    { email: { $ne: "" }, password: "x" },
+    { email: "a@b.c", password: ["x"] },
+    { email: "a@b.c", password: 123 },
+    { email: "a@b.c" },
+    "not an object",
+  ])("rejects a malformed login body with a 4xx, not a 500 (%#)", async (payload) => {
+    const res = await app.inject({ method: "POST", url: "/api/login", payload });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBeLessThan(500);
   });
 
   it("leaves the health check public", async () => {
