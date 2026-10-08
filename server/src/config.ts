@@ -40,8 +40,11 @@ export interface Config {
   npmContainer: string;
   /** Path to the Docker socket, used only to reload nginx in the NPM container. */
   dockerSocket: string;
-  /** Trust X-Forwarded-* headers (true when behind NPM/a reverse proxy). */
-  trustProxy: boolean;
+  /**
+   * Which proxies may set X-Forwarded-For: false, or a comma-separated list of
+   * addresses, CIDRs and proxy-addr presets (loopback, linklocal, uniquelocal).
+   */
+  trustProxy: false | string;
   /** Max failed logins per IP within the window before throttling. */
   loginMaxAttempts: number;
   /** Login throttle window in minutes. */
@@ -85,6 +88,24 @@ export function checkSessionSecret(secret: string): string | null {
   return null;
 }
 
+/**
+ * Proxies trusted by default: private, loopback and link-local addresses,
+ * which covers NPM on a Docker network. Trusting every hop (`true`) would let
+ * any client pick its own IP by sending X-Forwarded-For, since NPM appends to
+ * that header rather than replacing it.
+ */
+export const DEFAULT_TRUSTED_PROXIES = "loopback,linklocal,uniquelocal";
+
+/** Parse TRUST_PROXY. The old boolean "true" maps to the safe default. */
+export function parseTrustProxy(raw: string | undefined): false | string {
+  const value = (raw ?? "").trim();
+  if (value === "") return DEFAULT_TRUSTED_PROXIES;
+  const lower = value.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(lower)) return DEFAULT_TRUSTED_PROXIES;
+  if (["0", "false", "no", "off"].includes(lower)) return false;
+  return value;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const npmDataDir = env.NPM_DATA ?? "/data";
   const sessionSecret = env.SESSION_SECRET ?? "";
@@ -111,7 +132,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     nginxCustomDir: env.NGINX_CUSTOM_DIR ?? path.join(npmDataDir, "nginx", "custom"),
     npmContainer: env.NPM_CONTAINER ?? "",
     dockerSocket: env.DOCKER_SOCKET ?? "/var/run/docker.sock",
-    trustProxy: envBool("TRUST_PROXY", true),
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
     loginMaxAttempts: envInt("LOGIN_MAX_ATTEMPTS", 10),
     loginWindowMinutes: envInt("LOGIN_WINDOW_MINUTES", 15),
   };

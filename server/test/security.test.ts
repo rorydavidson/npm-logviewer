@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
+import Fastify from "fastify";
 import { RateLimiter } from "../src/security/rateLimit.js";
 import { sanitizeThreatConfig } from "../src/threats/validate.js";
-import { checkSessionSecret, loadConfig } from "../src/config.js";
+import {
+  checkSessionSecret,
+  loadConfig,
+  parseTrustProxy,
+  DEFAULT_TRUSTED_PROXIES,
+} from "../src/config.js";
 
 describe("session secret guard", () => {
   it("rejects a missing or short secret", () => {
@@ -113,5 +119,35 @@ describe("sanitizeThreatConfig", () => {
     expect(c.rules.scanner404?.enabled).toBe(false);
     expect(c.rules.scanner404?.severity).toBe("low");
     expect(c.rules.scanner404?.threshold).toBe(5);
+  });
+});
+
+describe("trusted proxies", () => {
+  it("maps unset and the old boolean true to private ranges only", () => {
+    expect(parseTrustProxy(undefined)).toBe(DEFAULT_TRUSTED_PROXIES);
+    expect(parseTrustProxy("true")).toBe(DEFAULT_TRUSTED_PROXIES);
+    expect(parseTrustProxy("false")).toBe(false);
+    expect(parseTrustProxy("172.18.0.0/16")).toBe("172.18.0.0/16");
+  });
+
+  async function clientIp(remoteAddress: string, xff: string): Promise<string> {
+    const app = Fastify({ trustProxy: parseTrustProxy(undefined) });
+    app.get("/ip", async (req) => req.ip);
+    const res = await app.inject({
+      url: "/ip",
+      remoteAddress,
+      headers: { "x-forwarded-for": xff },
+    });
+    await app.close();
+    return res.body;
+  }
+
+  it("ignores a spoofed X-Forwarded-For entry behind NPM", async () => {
+    // Client sent "6.6.6.6"; NPM (on a Docker network) appended the real IP.
+    expect(await clientIp("172.18.0.2", "6.6.6.6, 1.2.3.4")).toBe("1.2.3.4");
+  });
+
+  it("ignores X-Forwarded-For from a public peer", async () => {
+    expect(await clientIp("1.2.3.4", "6.6.6.6")).toBe("1.2.3.4");
   });
 });
