@@ -105,8 +105,8 @@ All via environment variables:
 | `LOGIN_MAX_ATTEMPTS` | `10` | Failed logins per IP allowed within the window before throttling. |
 | `LOGIN_WINDOW_MINUTES` | `15` | Login throttle window. |
 | `NGINX_CUSTOM_DIR` | `$NPM_DATA/nginx/custom` | Where the ban `deny` snippet is written. Must be NPM's custom-config dir, mounted read-write. |
-| `NPM_CONTAINER` | _(empty)_ | NPM container name. Set it (and mount the Docker socket) to reload nginx automatically when bans change. |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket path, used only to reload nginx in the NPM container. |
+| `NPM_CONTAINER` | _(empty)_ | NPM container name. Set it (and provide a filtered Docker socket, see [Making bans take effect](#making-bans-take-effect)) to reload nginx automatically when bans change. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker socket path, used only to reload nginx in the NPM container. Point it at the `docker-proxy` socket, not the host's. |
 
 ### Health check
 
@@ -270,14 +270,15 @@ Several safeguards mean it will not lock you (or legitimate visitors) out:
          - logviewer-state:/state
    ```
 2. **Reload nginx** so new bans apply. Either:
-   - **Automatic** — set `NPM_CONTAINER` (your NPM service's container name) and mount the Docker socket, and ProxyLogs reloads nginx itself on every change:
+   - **Automatic** — set `NPM_CONTAINER` (your NPM service's container name) and give ProxyLogs a *filtered* Docker socket, and it reloads nginx itself on every change. Use the `docker-proxy` service from [`docker-compose.example.yml`](docker-compose.example.yml): it allows only listing containers and running `nginx -s reload`, and refuses everything else. Then point ProxyLogs at it:
      ```yaml
          environment:
            NPM_CONTAINER: npm-app
+           DOCKER_SOCKET: /run/docker-proxy/docker.sock
          volumes:
-           - /var/run/docker.sock:/var/run/docker.sock
+           - docker-proxy-socket:/run/docker-proxy
      ```
-     Note: mounting the Docker socket grants the container significant host privileges — only do this if you accept that trade-off.
+     Do not mount the real `/var/run/docker.sock` into ProxyLogs. Full Docker API access is equivalent to root on the host, so any bug in the viewer would become a host compromise. Even through the proxy, exec access lets ProxyLogs run commands inside the NPM container, so keep the proxy if you enable this.
    - **Manual / passive** — leave it off; bans are written to the file and apply on NPM's next reload or restart. The Bans tab shows which mode is active.
 
 ProxyLogs reconciles the deny file with the full ban list on startup and every few minutes, so if a write ever fails (e.g. a permission problem) the file is brought back in sync automatically once the cause is fixed. You can also force it immediately with **Retry now** on the Bans tab. The reconcile is a no-op (no nginx reload) when the file already matches.

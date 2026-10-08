@@ -21,24 +21,53 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+      - docker-proxy
     environment:
       NPM_DATA: /data
       STATE_DB: /state/logviewer.sqlite
       SESSION_SECRET: ${LOGVIEWER_SECRET}
       BACKFILL_DAYS: 14
-      SECURE_COOKIE: "false"   # true once behind HTTPS
+      SECURE_COOKIE: "true"    # set "false" only while testing over plain HTTP
       RESEND_API_KEY: ${RESEND_API_KEY:-}   # optional: threat email alerts
       ALERT_FROM: ${ALERT_FROM:-ProxyLogs <onboarding@resend.dev>}
       SITE_URL: ${SITE_URL:-}               # e.g. https://logs.example.com (for email links)
       NPM_CONTAINER: npm-app                # enables auto nginx reload on ban changes
+      DOCKER_SOCKET: /run/docker-proxy/docker.sock   # filtered, see docker-proxy
       TZ: ${TZ:-UTC}
     volumes:
       - ./data:/data:ro        # shares NPM's logs + database, read-only
       - ./data/nginx/custom:/data/nginx/custom:rw   # writable: ban deny snippet
       - logviewer-state:/state
-      - /var/run/docker.sock:/var/run/docker.sock   # for nginx reload (host-privileged)
-    ports:
-      - "8090:8090"            # remove once proxied through NPM
+      - docker-proxy-socket:/run/docker-proxy       # for nginx reload only
+    # Not published: add an NPM proxy host for logviewer:8090 with SSL. To
+    # reach it directly during first setup only, uncomment (and set
+    # SECURE_COOKIE to "false" if you are not on HTTPS):
+    # ports:
+    #   - "8090:8090"
+
+  # Filtered Docker API for the ban reload. The viewer never sees the real
+  # socket: this proxy allows only listing containers and running an exec
+  # (nginx -s reload), and refuses everything else (creating containers,
+  # mounting volumes, pulling images), which would otherwise be host root.
+  # It runs as root only to open the host socket; capabilities are dropped.
+  docker-proxy:
+    image: wollomatic/socket-proxy:1.13.1
+    restart: unless-stopped
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    command:
+      - "-proxysocketendpoint=/run/docker-proxy/docker.sock"
+      - "-proxysocketendpointfilemode=0666"
+      - "-allowGET=/containers/json"
+      - "-allowPOST=/containers/[a-zA-Z0-9_.-]+/exec"
+      - "-allowPOST=/exec/[a-zA-Z0-9]+/start"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - docker-proxy-socket:/run/docker-proxy
 
 volumes:
   logviewer-state:
+  docker-proxy-socket:
