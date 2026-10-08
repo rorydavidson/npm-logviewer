@@ -18,7 +18,7 @@
     "bcryptjs": "^3.0.2",
     "chokidar": "^4.0.3",
     "fastify": "^5.3.2",
-    "geoip-lite": "^1.4.10"
+    "geoip-lite": "^2.0.3"
   },
   "devDependencies": {
     "@types/geoip-lite": "^1.4.4",
