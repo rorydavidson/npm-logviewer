@@ -6,6 +6,7 @@ import type { HostMap } from "../npm/hostMap.js";
 import type { Watcher } from "../ingest/watcher.js";
 import { verifyCredentials } from "../auth/auth.js";
 import { createToken, verifyToken, type SessionPayload } from "../auth/session.js";
+import { SessionRevocations, makeActiveUserCheck } from "../auth/revocation.js";
 import { parseFilter } from "./filter.js";
 import * as A from "../store/analytics.js";
 import type { AccessEntry, ErrorEntry } from "../types.js";
@@ -55,6 +56,18 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   const { config, store, npm, hosts, watcher, engine, mailer, bans } = ctx;
   const db = store.db;
 
+  const revocations = new SessionRevocations(db);
+  const isActiveUser = makeActiveUserCheck(npm);
+
+  /** Signature, expiry, logout and NPM user status; null if any fails. */
+  const validSession = (token: string | undefined): SessionPayload | null => {
+    const session = verifyToken(token, config.sessionSecret);
+    if (!session) return null;
+    if (revocations.isRevoked(session)) return null;
+    if (!isActiveUser(session.email)) return null;
+    return session;
+  };
+
   const loginLimiter = new RateLimiter(
     config.loginMaxAttempts,
     config.loginWindowMinutes * 60_000,
@@ -77,8 +90,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
       return reply;
     }
     if (PUBLIC_ROUTES.has(route)) return;
-    const token = req.cookies?.[COOKIE];
-    const session = verifyToken(token, config.sessionSecret);
+    const session = validSession(req.cookies?.[COOKIE]);
     if (!session) {
       reply.code(401).send({ error: "unauthorised" });
       return reply;
@@ -111,7 +123,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
 
     const exp = Math.floor(Date.now() / 1000) + config.sessionTtlSeconds;
     const token = createToken(
-      { email: result.email!, name: result.name ?? result.email!, exp },
+      { email: result.email!, name: result.name ?? result.email!, exp, iat: Date.now() },
       config.sessionSecret,
     );
     reply.setCookie(COOKIE, token, {
@@ -126,7 +138,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     return { ok: true, name: result.name, email: result.email };
   });
 
-  app.post("/api/logout", async (_req, reply) => {
+  app.post("/api/logout", async (req, reply) => {
+    const s = (req as FastifyRequest & { session: SessionPayload }).session;
+    revocations.revokeAll(s.email);
     reply.clearCookie(COOKIE, { path: "/" });
     return { ok: true };
   });
@@ -371,7 +385,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     watcher.on("access-entry", onAccess);
     watcher.on("error-entry", onError);
 
-    const ping = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
+    // The auth gate only runs when the stream opens, so re-check the session
+    // on each ping and close the stream once it expires or is revoked.
+    const token = req.cookies?.[COOKIE];
+    const ping = setInterval(() => {
+      if (!validSession(token)) {
+        // Destroying the socket fires the close handlers below, which clean up.
+        req.raw.destroy();
+        return;
+      }
+      reply.raw.write(": ping\n\n");
+    }, 25_000);
     ping.unref();
 
     req.raw.on("close", () => {

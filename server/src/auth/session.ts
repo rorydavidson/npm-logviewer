@@ -4,6 +4,8 @@ export interface SessionPayload {
   email: string;
   name: string;
   exp: number; // epoch seconds
+  /** Issued-at, epoch ms. Absent on tokens minted before revocation existed. */
+  iat?: number;
 }
 
 function b64url(buf: Buffer): string {

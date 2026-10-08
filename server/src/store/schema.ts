@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value TEXT NOT NULL
 );
 
+-- Per-user "sessions issued before this are void" timestamp (epoch ms), set on
+-- logout. Session tokens are stateless, so this is what makes logout stick.
+CREATE TABLE IF NOT EXISTS session_revocation (
+  email          TEXT PRIMARY KEY,
+  revoked_before INTEGER NOT NULL
+);
+
 -- Threat findings raised by the detection engine. One row per (rule, subject),
 -- with the count and last-seen bumped each time the rule re-fires.
 CREATE TABLE IF NOT EXISTS threat_finding (
