@@ -21,6 +21,9 @@ import { RateLimiter } from "../security/rateLimit.js";
 
 const COOKIE = "lv_session";
 
+/** API routes reachable without a session. Matched against route patterns. */
+const PUBLIC_ROUTES = new Set(["/api/login", "/api/health"]);
+
 export interface AppCtx {
   config: Config;
   store: Store;
@@ -50,11 +53,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
   // Deliberately says nothing about the deployment beyond liveness.
   app.get("/api/health", async () => ({ ok: true }));
 
-  // --- auth gate for everything under /api except login -------------------
+  // --- auth gate for everything under /api except the public routes -------
+  // Decide on the matched route pattern, never the raw URL: the router
+  // percent-decodes the path before matching, so "/%61pi/threats" reaches the
+  // /api/threats handler while its raw URL does not start with "/api/".
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
-    if (!req.url.startsWith("/api/")) return;
-    if (req.url.startsWith("/api/login")) return;
-    if (req.url.startsWith("/api/health")) return;
+    const route = req.routeOptions.url;
+    // No matched route means the not-found handler, which serves no data.
+    if (!route || !route.startsWith("/api/")) return;
+    if (PUBLIC_ROUTES.has(route)) return;
     const token = req.cookies?.[COOKIE];
     const session = verifyToken(token, config.sessionSecret);
     if (!session) {
