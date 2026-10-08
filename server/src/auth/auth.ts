@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { NpmDb } from "../npm/npmDb.js";
 
@@ -14,16 +15,25 @@ export interface AuthResult {
  * Always runs a bcrypt comparison (even when the user is missing) to keep the
  * response time roughly constant and avoid leaking which emails exist.
  */
+// Nginx Proxy Manager hashes passwords with bcrypt cost 13. The dummy hash
+// must use the same cost, and be a well-formed hash: bcryptjs rejects a
+// malformed one instantly, which would make unknown emails fail measurably
+// faster than real ones. Built once, on first use, to keep startup fast.
+const NPM_BCRYPT_COST = 13;
+let dummyHash: Promise<string> | null = null;
+
+function getDummyHash(): Promise<string> {
+  dummyHash ??= bcrypt.hash(crypto.randomBytes(32).toString("hex"), NPM_BCRYPT_COST);
+  return dummyHash;
+}
+
 export async function verifyCredentials(
   npm: NpmDb,
   email: string,
   password: string,
 ): Promise<AuthResult> {
   const user = npm.findUserByEmail(email);
-  // Dummy hash used when the user/hash is absent, to equalise timing.
-  const hash =
-    user?.passwordHash ??
-    "$2a$13$AbCdEfGhIjKlMnOpQrStUuVwXyZ0123456789abcdefghijklmno";
+  const hash = user?.passwordHash ?? (await getDummyHash());
 
   let match = false;
   try {

@@ -101,7 +101,7 @@ All via environment variables:
 | `RESEND_API_KEY` | _(empty)_ | Resend API key. When set, the Threats tab can email alerts. Empty disables sending. |
 | `ALERT_FROM` | `ProxyLogs <onboarding@resend.dev>` | From address for alert emails. Must be a sender verified in your Resend account (the `onboarding@resend.dev` default only delivers to your own Resend login email). |
 | `SITE_URL` | _(empty)_ | Public base URL of the dashboard (e.g. `https://logs.example.com`). Used to add clickable deep links in alert emails. |
-| `TRUST_PROXY` | `true` | Trust `X-Forwarded-For` so the login rate limiter sees the real client IP. Keep `true` behind NPM; set `false` only if the app is exposed directly with no proxy. |
+| `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Which proxies may set `X-Forwarded-For`, so the login rate limiter sees the real client IP. The default trusts private addresses, which covers NPM on a Docker network. Narrow it to NPM's network (e.g. `172.18.0.0/16`) if you like, or set `false` if the app is exposed directly with no proxy. `true` is treated as the default; trusting every hop would let clients spoof their IP. |
 | `LOGIN_MAX_ATTEMPTS` | `10` | Failed logins per IP allowed within the window before throttling. |
 | `LOGIN_WINDOW_MINUTES` | `15` | Login throttle window. |
 | `NGINX_CUSTOM_DIR` | `$NPM_DATA/nginx/custom` | Where the ban `deny` snippet is written. Must be NPM's custom-config dir, mounted read-write. |
@@ -290,7 +290,7 @@ The viewer is built to sit on the public internet behind NPM, so it ships with s
 
 - **Authentication** on every API route and page, reusing NPM's credentials (bcrypt verified, NPM DB opened read-only). Constant-time comparison and a dummy hash avoid user-enumeration via timing.
 - **Sessions** are signed (HMAC-SHA256), HTTP-only cookies with `SameSite=Lax`. Set `SECURE_COOKIE=true` behind HTTPS to add the `Secure` flag and enable HSTS. The app refuses to start in production on a missing, short, or placeholder `SESSION_SECRET`, since anyone knowing the signing key can mint a valid session.
-- **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. Keep `TRUST_PROXY=true` so the limit keys on the real visitor, not NPM.
+- **Login rate limiting** per client IP (`LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES`) to blunt brute force. `TRUST_PROXY` trusts only private-network proxies such as NPM, so the limit keys on the real visitor and a client cannot dodge it by sending its own `X-Forwarded-For`.
 - **Security headers** on every response: a locked-down same-origin Content-Security-Policy, `X-Frame-Options: DENY` and `frame-ancestors 'none'` (clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and HSTS when served over HTTPS.
 - **Same-origin only** — no CORS is enabled, so other sites cannot read the API from a browser.
 - **Not indexable** — ships a `robots.txt` that disallows everything plus a `noindex` meta tag, so the dashboard stays out of search engines.
