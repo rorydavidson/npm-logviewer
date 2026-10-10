@@ -52,6 +52,15 @@ export interface ThreatConfig {
      */
     minScore: number;
   };
+  /** Files, extensions or paths that are never served on this instance. */
+  blockedPaths: {
+    /** Return 444 for matching requests at nginx, on every proxy host. */
+    block: boolean;
+    /** Ban a client as soon as it requests a matching path. */
+    autoBan: boolean;
+    /** See blockedPaths.ts for the pattern format. */
+    patterns: string[];
+  };
   /** IPs or CIDR ranges to ignore in all detectors (e.g. your own address). */
   exceptions: string[];
   rules: Record<string, RuleConfig>;

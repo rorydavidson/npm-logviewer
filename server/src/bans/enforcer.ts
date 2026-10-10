@@ -9,6 +9,10 @@ const BAN_FILENAME = "proxylogs-bans.conf";
 const NPM_INCLUDE_PATH = `/data/nginx/custom/${BAN_FILENAME}`;
 const INCLUDE_LINE = `include ${NPM_INCLUDE_PATH}; # proxylogs-bans`;
 
+const BLOCKED_FILENAME = "proxylogs-blocked-paths.conf";
+const BLOCKED_INCLUDE_PATH = `/data/nginx/custom/${BLOCKED_FILENAME}`;
+const BLOCKED_INCLUDE_LINE = `include ${BLOCKED_INCLUDE_PATH}; # proxylogs-blocked-paths`;
+
 export interface EnforcerOpts {
   customDir: string;
   dockerSocket: string;
@@ -71,7 +75,7 @@ export class BanEnforcer {
     } catch {
       existing = null;
     }
-    this.#ensureInclude();
+    this.#ensureInclude(NPM_INCLUDE_PATH, INCLUDE_LINE);
     if (existing === body) return;
 
     const tmp = `${target}.tmp`;
@@ -86,20 +90,60 @@ export class BanEnforcer {
     await this.#reload();
   }
 
-  /** Make sure NPM's per-host config includes our ban file. */
-  #ensureInclude(): void {
+  /**
+   * Write the never-served paths snippet: a regex location returning 444, or
+   * an empty (comment-only) file when blocking is off. The file is written
+   * before the include is added, since nginx refuses to load a config that
+   * includes a missing file. `regex` must come from blockedPathsRegex(), whose
+   * character whitelist keeps it from escaping the location directive.
+   */
+  async syncBlockedPaths(regex: string | null): Promise<void> {
+    const { customDir, log } = this.#opts;
+    const target = path.join(customDir, BLOCKED_FILENAME);
+    const body =
+      "# Managed by ProxyLogs — do not edit. Paths never served on this instance.\n" +
+      (regex ? `location ~* "${regex}" {\n  return 444;\n}\n` : "");
+
+    let existing: string | null = null;
+    try {
+      existing = fs.readFileSync(target, "utf8");
+    } catch {
+      existing = null;
+    }
+    if (existing !== body) {
+      try {
+        fs.mkdirSync(customDir, { recursive: true });
+        const tmp = `${target}.tmp`;
+        fs.writeFileSync(tmp, body, { mode: 0o644 });
+        fs.renameSync(tmp, target);
+      } catch (err) {
+        log("blocked paths: cannot write snippet", { target, err });
+        return;
+      }
+    }
+    const included = this.#ensureInclude(BLOCKED_INCLUDE_PATH, BLOCKED_INCLUDE_LINE);
+    if (existing !== body || included) await this.#reload();
+  }
+
+  /**
+   * Make sure NPM's per-host config includes one of our snippets. Returns true
+   * when the include line was added just now.
+   */
+  #ensureInclude(includePath: string, includeLine: string): boolean {
     const { customDir, log } = this.#opts;
     const serverProxy = path.join(customDir, "server_proxy.conf");
     try {
       let current = "";
       if (fs.existsSync(serverProxy)) current = fs.readFileSync(serverProxy, "utf8");
-      if (current.includes(NPM_INCLUDE_PATH)) return; // already included
+      if (current.includes(includePath)) return false; // already included
       const next =
-        (current.trimEnd() ? current.trimEnd() + "\n" : "") + INCLUDE_LINE + "\n";
+        (current.trimEnd() ? current.trimEnd() + "\n" : "") + includeLine + "\n";
       fs.writeFileSync(serverProxy, next, { mode: 0o644 });
-      log("ban enforce: added include to server_proxy.conf", {});
+      log("ban enforce: added include to server_proxy.conf", { includePath });
+      return true;
     } catch (err) {
       log("ban enforce: cannot update server_proxy.conf", { serverProxy, err });
+      return false;
     }
   }
 

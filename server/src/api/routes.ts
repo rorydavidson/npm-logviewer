@@ -14,7 +14,8 @@ import type { ThreatEngine } from "../threats/engine.js";
 import type { Mailer } from "../threats/mailer.js";
 import type { BanService } from "../bans/service.js";
 import { DETECTORS } from "../threats/detectors.js";
-import { sanitizeThreatConfig } from "../threats/validate.js";
+import { invalidBlockedPatterns, sanitizeThreatConfig } from "../threats/validate.js";
+import type { BlockedPaths } from "../threats/blockedPaths.js";
 import { geoForSubject, targetsForSubject } from "../threats/enrich.js";
 import { lookupGeo } from "../ingest/geo.js";
 import type { Severity } from "../threats/types.js";
@@ -35,6 +36,7 @@ export interface AppCtx {
   engine: ThreatEngine;
   mailer: Mailer;
   bans: BanService;
+  blockedPaths: BlockedPaths;
 }
 
 function num(v: unknown, fallback: number): number {
@@ -53,7 +55,7 @@ export function pageParams(q: Record<string, string>): { limit: number; offset: 
 }
 
 export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise<void> {
-  const { config, store, npm, hosts, watcher, engine, mailer, bans } = ctx;
+  const { config, store, npm, hosts, watcher, engine, mailer, bans, blockedPaths } = ctx;
   const db = store.db;
 
   const revocations = new SessionRevocations(db);
@@ -305,9 +307,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: AppCtx): Promise
     if (!req.body || typeof req.body !== "object") {
       return reply.code(400).send({ error: "invalid config" });
     }
+    // Reject rather than silently drop a bad pattern, so the user sees why.
+    const badPatterns = invalidBlockedPatterns(req.body);
+    if (badPatterns.length) {
+      return reply.code(400).send({
+        error: `Invalid blocked path pattern: ${badPatterns.slice(0, 5).join(", ")}. Use letters, digits and . _ - ~ / * only.`,
+      });
+    }
     // Coerce/clamp untrusted input into a safe, well-formed config.
     const clean = sanitizeThreatConfig(req.body);
     engine.setConfig(clean);
+    await blockedPaths.apply();
     // Re-evaluate immediately so the UI reflects the new rules.
     void engine.evaluate();
     return { ok: true, config: clean };

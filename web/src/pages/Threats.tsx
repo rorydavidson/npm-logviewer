@@ -80,7 +80,12 @@ export default function Threats() {
   };
   const saveConfig = async () => {
     if (!config) return;
-    await api.saveThreatConfig(config);
+    try {
+      await api.saveThreatConfig(config);
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "Saving settings failed");
+      return;
+    }
     flash("Settings saved");
     setTimeout(() => void reload(), 500);
   };
@@ -479,6 +484,63 @@ function SettingsPanel({
             />
           </label>
         </div>
+      </div>
+
+      {/* Never-served paths */}
+      <div className="mb-4 rounded-lg border border-gray-800 p-3">
+        <div className="text-sm font-medium text-gray-200">Blocked files &amp; paths</div>
+        <p className="mt-1 text-xs text-gray-500">
+          Files, extensions or paths this instance never serves. Applies to every
+          proxy host, so only list what none of your apps use. One per line:{" "}
+          <code>wp-trackback.php</code> (a file name anywhere), <code>*.php</code>{" "}
+          (an extension anywhere), or <code>/wp-admin/*</code> (a path from the
+          root). Letters, digits and <code>. _ - ~ / *</code> only.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-xs text-gray-300">
+            <input
+              type="checkbox"
+              checked={config.blockedPaths.block}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  blockedPaths: { ...config.blockedPaths, block: e.target.checked },
+                })
+              }
+            />
+            Block at nginx (444, never reaches the app)
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-300">
+            <input
+              type="checkbox"
+              checked={config.blockedPaths.autoBan}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  blockedPaths: { ...config.blockedPaths, autoBan: e.target.checked },
+                })
+              }
+            />
+            Ban the requesting IP immediately
+          </label>
+        </div>
+        <textarea
+          value={config.blockedPaths.patterns.join("\n")}
+          onChange={(e) =>
+            onChange({
+              ...config,
+              blockedPaths: {
+                ...config.blockedPaths,
+                // Keep blank lines while typing; the server trims and drops them.
+                patterns: e.target.value.split("\n"),
+              },
+            })
+          }
+          rows={4}
+          spellCheck={false}
+          placeholder={"e.g. *.php\nwp-trackback.php\n/wp-admin/*"}
+          className="mt-2 w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
+        />
       </div>
 
       {/* Exception list */}

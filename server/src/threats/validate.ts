@@ -1,4 +1,5 @@
 import { DETECTOR_BY_ID, defaultConfig } from "./detectors.js";
+import { isValidBlockedPattern } from "./blockedPaths.js";
 import { SEVERITY_RANK, type RuleConfig, type Severity, type ThreatConfig } from "./types.js";
 
 const SEVERITIES = Object.keys(SEVERITY_RANK) as Severity[];
@@ -23,6 +24,17 @@ function asStringList(v: unknown, maxItems: number, maxLen: number): string[] {
     if (out.length >= maxItems) break;
   }
   return out;
+}
+
+/** Blocked-path patterns in an untrusted config that would be rejected. */
+export function invalidBlockedPatterns(input: unknown): string[] {
+  const raw = (input ?? {}) as { blockedPaths?: { patterns?: unknown } };
+  const list = raw.blockedPaths?.patterns;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => p.trim())
+    .filter((p) => p && !isValidBlockedPattern(p));
 }
 
 /**
@@ -70,6 +82,21 @@ export function sanitizeThreatConfig(input: unknown): ThreatConfig {
     alertMinSeverity: asSeverity(raw.alertMinSeverity, base.alertMinSeverity),
     alertEmail:
       typeof raw.alertEmail === "string" ? raw.alertEmail.trim().slice(0, 320) : "",
+    blockedPaths: {
+      block:
+        typeof raw.blockedPaths?.block === "boolean"
+          ? raw.blockedPaths.block
+          : base.blockedPaths.block,
+      autoBan:
+        typeof raw.blockedPaths?.autoBan === "boolean"
+          ? raw.blockedPaths.autoBan
+          : base.blockedPaths.autoBan,
+      patterns: asStringList(
+        raw.blockedPaths?.patterns ?? base.blockedPaths.patterns,
+        200,
+        200,
+      ).filter(isValidBlockedPattern),
+    },
     exceptions: asStringList(raw.exceptions, 1000, 64),
     rules,
   };
