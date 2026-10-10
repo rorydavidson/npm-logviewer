@@ -239,6 +239,23 @@ Each finding shows the attacker IP (with country flag) and the **proxy hosts it 
 
 **Exceptions:** add trusted IPs or CIDR ranges (e.g. your own address) so they are ignored by every rule. Both IPv4 and IPv6 ranges work; add your home delegated prefix (typically a /56 or /48) to cover every device on your network whatever address it rotates to. Use the **Trust IP** button on any finding (for IPv6 it trusts the whole /64), or edit the list in Settings. Existing findings for a newly trusted address are removed on the next cycle.
 
+### Blocked files and paths
+
+Some files are never served by anything you run (`*.php` on a stack with no PHP, `wp-trackback.php` without WordPress), so any request for them is hostile. List them under Threats → Settings → **Blocked files & paths**, one per line:
+
+- `wp-trackback.php`: a file name, in any directory
+- `*.php`: an extension, in any directory
+- `/wp-admin/*`: a path from the root (`*` here matches anything, including `/`)
+
+Matching is case-insensitive and applies to the path only, not the query string. Only letters, digits and `. _ - ~ / *` are accepted, so a pattern cannot inject nginx config.
+
+Two switches, both off by default:
+
+- **Block at nginx:** ProxyLogs writes `proxylogs-blocked-paths.conf` (a regex `location` returning 444) and includes it from `server_proxy.conf`, so it applies to **every proxy host** and the request never reaches your app. Only list paths none of your hosts use. If a host has its own regex `location` in its advanced config, that one can take precedence.
+- **Ban immediately:** a client requesting a listed path is banned within seconds of the log line arriving, without waiting for the auto-ban score. Exceptions, private and Cloudflare addresses are still never banned, and log lines older than the detection window are ignored.
+
+Blocked requests are logged with status 444, so they also count towards the malformed-requests detector.
+
 ### Email alerts (Resend)
 
 1. Set `RESEND_API_KEY` (and optionally `ALERT_FROM`) in the container environment.
