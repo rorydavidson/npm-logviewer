@@ -131,6 +131,11 @@ export interface ThreatConfig {
     minFindings: number;
     minScore: number;
   };
+  blockedPaths: {
+    block: boolean;
+    autoBan: boolean;
+    patterns: string[];
+  };
   exceptions: string[];
   rules: Record<string, RuleConfig>;
 }
