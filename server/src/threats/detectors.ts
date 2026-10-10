@@ -1,5 +1,6 @@
 import type { DB } from "../store/db.js";
 import type { RawFinding, RuleConfig } from "./types.js";
+import { DEFAULT_BLOCKED_PATTERNS } from "./blockedPaths.js";
 
 export interface Detector {
   id: string;
@@ -494,6 +495,8 @@ export function defaultConfig(): import("./types.js").ThreatConfig {
     // Enabled by default: the score gate, good-history guard, trusted ranges,
     // and private/Cloudflare checks make unattended banning safe to self-run.
     autoBan: { enabled: true, minSeverity: "critical", minFindings: 2, minScore: 12 },
+    // Off by default: blocking *.php would break any proxy host that serves PHP.
+    blockedPaths: { block: false, autoBan: false, patterns: [...DEFAULT_BLOCKED_PATTERNS] },
     exceptions: [],
     rules,
   };

@@ -9,6 +9,7 @@ import { HostMap } from "./npm/hostMap.js";
 import { Watcher } from "./ingest/watcher.js";
 import { Settings } from "./store/settings.js";
 import { Mailer } from "./threats/mailer.js";
+import { BlockedPaths } from "./threats/blockedPaths.js";
 import { ThreatEngine } from "./threats/engine.js";
 import { BanStore } from "./bans/store.js";
 import { BanEnforcer } from "./bans/enforcer.js";
@@ -73,7 +74,27 @@ async function main(): Promise<void> {
   }, 5 * 60_000);
   banReconcile.unref();
 
-  const ctx: AppCtx = { config, store, npm, hosts, watcher, engine, mailer, bans };
+  // Never-served paths: an nginx 444 snippet plus instant bans on ingest.
+  const blockedPaths = new BlockedPaths(
+    () => engine.getConfig(),
+    bans,
+    banEnforcer,
+    (msg, extra) => app.log.info({ ...(extra as object) }, msg),
+  );
+  blockedPaths.apply().catch((err) => app.log.warn({ err }, "blocked paths sync failed"));
+  watcher.on("access-entry", (e) => blockedPaths.handle(e));
+
+  const ctx: AppCtx = {
+    config,
+    store,
+    npm,
+    hosts,
+    watcher,
+    engine,
+    mailer,
+    bans,
+    blockedPaths,
+  };
   await registerRoutes(app, ctx);
 
   // Serve the built frontend if present (single-container deployment).
@@ -112,6 +133,8 @@ async function main(): Promise<void> {
     hosts.stop();
     engine.stop();
     await watcher.stop();
+    // Ban anything still queued so a restart does not let it slip through.
+    await blockedPaths.flush().catch(() => {});
     await app.close();
     store.close();
     npm.close();

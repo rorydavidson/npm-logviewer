@@ -124,6 +124,7 @@ export class ThreatEngine {
       ...base,
       ...saved,
       autoBan: { ...base.autoBan, ...saved.autoBan },
+      blockedPaths: { ...base.blockedPaths, ...saved.blockedPaths },
       rules: { ...base.rules, ...saved.rules },
     };
   }
