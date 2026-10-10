@@ -220,12 +220,18 @@ The **Threats** tab runs a set of detectors over a rolling window (default 10 mi
 
 - 404 scanning, path fuzzing, and cross-host scanning by a single client
 - auth brute force (repeated 401/403)
-- requests for known exploit paths (`.env`, `.git`, `wp-login`, phpMyAdmin, …)
-- SQLi / XSS / path-traversal payloads in the URL
-- hacking-tool user agents (sqlmap, nikto, nmap, masscan, …)
+- login floods (many POSTs to login endpoints, for apps that answer a failed login with 200)
+- requests for known exploit paths (`.env`, `.git`, `wp-login`, phpMyAdmin, Laravel Ignition, Fortinet/Cisco/F5 appliance endpoints, exposed Docker API, …)
+- SQLi / XSS / path-traversal / command-injection payloads in the URL, including cloud-metadata SSRF
+- exploit payloads hidden in the user agent or referer (Log4Shell `${jndi:`, Shellshock, script tags)
+- hacking-tool user agents (sqlmap, nikto, nuclei, ffuf, masscan, …)
+- open-proxy probing (absolute URLs in the request line)
+- bursts of malformed or wrong-protocol requests (400/444/494/497)
 - request floods, unusual HTTP methods, direct-IP probing, and 5xx surges
 
 Everything is editable in the UI: enable/disable each rule, change its severity, adjust thresholds, and edit the match patterns for the pattern-based rules. Settings persist in the state database.
+
+When an upgrade ships new default patterns for a rule you have already customised, they are appended to your list on startup. Patterns you removed yourself are not brought back. Patterns are SQL `LIKE` expressions, so `%` is always a wildcard; match decoded text (`php://`) rather than percent-encoded bytes (`%00`).
 
 **IPv6 actors:** detection counts per actor, not per address. IPv6 clients rotate privacy addresses within their /64 prefix, so all addresses in one /64 are treated as a single actor. A scanner cannot dodge a threshold by rotating addresses, and your own devices are judged collectively rather than as a parade of strangers.
 

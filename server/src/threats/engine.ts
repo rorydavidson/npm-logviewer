@@ -1,7 +1,7 @@
 import type { DB } from "../store/db.js";
 import type { Settings } from "../store/settings.js";
 import type { Mailer } from "./mailer.js";
-import { DETECTORS, defaultConfig } from "./detectors.js";
+import { BASELINE_DEFAULT_PATTERNS, DETECTORS, defaultConfig } from "./detectors.js";
 import { classifyIp, ipMatchesAny, ipv6Subnet } from "../ingest/networks.js";
 import { geoForSubject, targetsForSubject, type TargetHost } from "./enrich.js";
 import type { BanService } from "../bans/service.js";
@@ -14,6 +14,7 @@ import {
 } from "./types.js";
 
 const CONFIG_KEY = "threat_config";
+const OFFERED_PATTERNS_KEY = "threat_offered_patterns";
 
 /**
  * Good-history guard for auto-bans: a client with an established record of
@@ -61,6 +62,7 @@ export class ThreatEngine {
     this.#siteUrl = siteUrl.replace(/\/+$/, "");
     this.#label = label;
     this.#bans = bans;
+    this.#offerNewDefaultPatterns();
     this.#upsert = db.prepare(`
       INSERT INTO threat_finding
         (rule, subject, severity, title, detail, host_label, sample, count, first_ts, last_ts, acknowledged)
@@ -74,6 +76,43 @@ export class ThreatEngine {
         last_ts  = excluded.last_ts,
         acknowledged = 0
     `);
+  }
+
+  /**
+   * A saved rule replaces its defaults wholesale, so patterns added to a
+   * detector in a later release would never reach an existing install. Fold in
+   * any default pattern this install has not been offered before. Tracking what
+   * was offered, rather than diffing against the current defaults, means a
+   * pattern the user deliberately removed stays removed.
+   */
+  #offerNewDefaultPatterns(): void {
+    const saved = this.#settings.getJSON<ThreatConfig>(CONFIG_KEY);
+    // Installs from before this tracking existed were offered the baseline.
+    const offered =
+      this.#settings.getJSON<Record<string, string[]>>(OFFERED_PATTERNS_KEY) ??
+      BASELINE_DEFAULT_PATTERNS;
+
+    if (saved?.rules) {
+      const added: Record<string, number> = {};
+      for (const d of DETECTORS) {
+        const rule = saved.rules[d.id];
+        if (!rule?.patterns || !d.defaults.patterns) continue;
+        const seen = new Set([...(offered[d.id] ?? []), ...rule.patterns]);
+        const fresh = d.defaults.patterns.filter((p) => !seen.has(p));
+        if (fresh.length) {
+          rule.patterns = [...rule.patterns, ...fresh];
+          added[d.id] = fresh.length;
+        }
+      }
+      if (Object.keys(added).length) {
+        this.#settings.setJSON(CONFIG_KEY, saved);
+        this.#onLog("added new default threat patterns", added);
+      }
+    }
+
+    const current: Record<string, string[]> = {};
+    for (const d of DETECTORS) if (d.defaults.patterns) current[d.id] = d.defaults.patterns;
+    this.#settings.setJSON(OFFERED_PATTERNS_KEY, current);
   }
 
   /** Stored config merged over defaults, so newly added detectors get defaults. */
