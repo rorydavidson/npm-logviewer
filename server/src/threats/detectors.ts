@@ -17,11 +17,12 @@ const SUBJECT_CAP = 50;
 function likeAny(
   col: string,
   patterns: string[],
+  prefix = "p",
 ): { sql: string; params: Record<string, string> } {
   const params: Record<string, string> = {};
   const parts = patterns.map((p, i) => {
-    params[`p${i}`] = p;
-    return `${col} LIKE @p${i}`;
+    params[`${prefix}${i}`] = p;
+    return `${col} LIKE @${prefix}${i}`;
   });
   return { sql: parts.length ? `(${parts.join(" OR ")})` : "0", params };
 }
@@ -62,6 +63,119 @@ function byClient(
   }));
 }
 
+/*
+ * Default pattern lists are kept per release (V1, V2, ...) so the engine can
+ * tell which defaults an existing install has already been offered. Append new
+ * patterns as a new list rather than editing an old one.
+ */
+const BAD_PATHS_V1 = [
+  "%/.env%",
+  "%/.git%",
+  "%/wp-login%",
+  "%/wp-admin%",
+  "%/xmlrpc.php%",
+  "%/phpmyadmin%",
+  "%/.aws%",
+  "%/.ssh%",
+  "%/actuator%",
+  "%/vendor/phpunit%",
+  "%/cgi-bin%",
+  "%/boaform%",
+  "%/solr/%",
+  "%/config.json%",
+  "%/.well-known/security%",
+];
+
+const BAD_PATHS_V2 = [
+  "%/.svn%",
+  "%/.hg/%",
+  "%/.ds_store%",
+  "%/.htpasswd%",
+  "%/wp-config%",
+  "%/server-status%",
+  "%/sftp-config.json%",
+  "%.sql",
+  "%.bak",
+  // Known-CVE and appliance endpoints that only ever see exploit traffic.
+  "%/_ignition/execute-solution%",
+  "%/manager/html%",
+  "%/hnap1%",
+  "%/gponform%",
+  "%/remote/fgt_lang%",
+  "%/+cscoe+%",
+  "%/mgmt/tm/%",
+  "%/owa/auth%",
+  "%/autodiscover/autodiscover.json%",
+  "%/containers/json%",
+  "%/debug/pprof%",
+];
+
+const INJECTION_V1 = [
+  "%union%select%",
+  "%or%1=1%",
+  "%' or '%",
+  "%<script%",
+  "%onerror=%",
+  "%/etc/passwd%",
+  "%information_schema%",
+  "%sleep(%",
+  "%benchmark(%",
+  "%../%",
+  "%..%2f%",
+  "%base64_decode%",
+  "%cmd=%",
+  "%exec(%",
+];
+
+const INJECTION_V2 = [
+  "%jndi%",
+  "%/bin/sh%",
+  "%/bin/bash%",
+  "%php://%",
+  "%file://%",
+  "%/proc/self/%",
+  "%win.ini%",
+  "%169.254.169.254%",
+  "%allow_url_include%",
+  "%auto_prepend_file%",
+];
+
+const BAD_AGENTS_V1 = [
+  "%sqlmap%",
+  "%nikto%",
+  "%nmap%",
+  "%masscan%",
+  "%nessus%",
+  "%dirbuster%",
+  "%gobuster%",
+  "%hydra%",
+  "%wpscan%",
+  "%zgrab%",
+  "%acunetix%",
+];
+
+const BAD_AGENTS_V2 = [
+  "%nuclei%",
+  "%ffuf%",
+  "%feroxbuster%",
+  "%wfuzz%",
+  "%dirb%",
+  "%whatweb%",
+  "%commix%",
+  "%zmeu%",
+  "%l9explore%",
+  "%l9tcpid%",
+  "%censysinspect%",
+  "%expanse%",
+];
+
+/** Default patterns every install had been offered before release tracking began. */
+export const BASELINE_DEFAULT_PATTERNS: Record<string, string[]> = {
+  badPaths: BAD_PATHS_V1,
+  injection: INJECTION_V1,
+  badAgents: BAD_AGENTS_V1,
+};
+
 export const DETECTORS: Detector[] = [
   {
     id: "scanner404",
@@ -99,23 +213,7 @@ export const DETECTORS: Detector[] = [
       enabled: true,
       severity: "critical",
       threshold: 1,
-      patterns: [
-        "%/.env%",
-        "%/.git%",
-        "%/wp-login%",
-        "%/wp-admin%",
-        "%/xmlrpc.php%",
-        "%/phpmyadmin%",
-        "%/.aws%",
-        "%/.ssh%",
-        "%/actuator%",
-        "%/vendor/phpunit%",
-        "%/cgi-bin%",
-        "%/boaform%",
-        "%/solr/%",
-        "%/config.json%",
-        "%/.well-known/security%",
-      ],
+      patterns: [...BAD_PATHS_V1, ...BAD_PATHS_V2],
     },
     editable: { threshold: true, patterns: true },
     run: (db, from, to, cfg) => {
@@ -132,22 +230,7 @@ export const DETECTORS: Detector[] = [
       enabled: true,
       severity: "critical",
       threshold: 1,
-      patterns: [
-        "%union%select%",
-        "%or%1=1%",
-        "%' or '%",
-        "%<script%",
-        "%onerror=%",
-        "%/etc/passwd%",
-        "%information_schema%",
-        "%sleep(%",
-        "%benchmark(%",
-        "%../%",
-        "%..%2f%",
-        "%base64_decode%",
-        "%cmd=%",
-        "%exec(%",
-      ],
+      patterns: [...INJECTION_V1, ...INJECTION_V2],
     },
     editable: { threshold: true, patterns: true },
     run: (db, from, to, cfg) => {
@@ -164,19 +247,7 @@ export const DETECTORS: Detector[] = [
       enabled: true,
       severity: "high",
       threshold: 1,
-      patterns: [
-        "%sqlmap%",
-        "%nikto%",
-        "%nmap%",
-        "%masscan%",
-        "%nessus%",
-        "%dirbuster%",
-        "%gobuster%",
-        "%hydra%",
-        "%wpscan%",
-        "%zgrab%",
-        "%acunetix%",
-      ],
+      patterns: [...BAD_AGENTS_V1, ...BAD_AGENTS_V2],
     },
     editable: { threshold: true, patterns: true },
     run: (db, from, to, cfg) => {
@@ -279,6 +350,106 @@ export const DETECTORS: Detector[] = [
         {},
         cfg.threshold ?? 1,
       ),
+  },
+  {
+    id: "headerInjection",
+    title: "Exploit payloads in headers",
+    description:
+      "User agent or referer carrying an exploit payload (Log4Shell ${jndi:, Shellshock () {, script tags, shell paths). Bots hide these in headers because many filters only inspect the URL.",
+    defaults: {
+      enabled: true,
+      severity: "critical",
+      threshold: 1,
+      patterns: [
+        "%jndi:%",
+        "%${%",
+        "%() {%",
+        "%<script%",
+        "%union%select%",
+        "%/bin/sh%",
+        "%/bin/bash%",
+        "%/etc/passwd%",
+      ],
+    },
+    editable: { threshold: true, patterns: true },
+    run: (db, from, to, cfg) => {
+      const ua = likeAny("user_agent", cfg.patterns ?? []);
+      const ref = likeAny("referer", cfg.patterns ?? [], "r");
+      return byClient(
+        db,
+        from,
+        to,
+        `(${ua.sql} OR ${ref.sql})`,
+        { ...ua.params, ...ref.params },
+        cfg.threshold ?? 1,
+      );
+    },
+  },
+  {
+    id: "openProxy",
+    title: "Open-proxy probing",
+    description:
+      "Requests with an absolute URL in the request line (GET http://...), sent to check whether your server will relay traffic to other sites.",
+    defaults: { enabled: true, severity: "high", threshold: 1 },
+    editable: { threshold: true, patterns: false },
+    run: (db, from, to, cfg) =>
+      byClient(
+        db,
+        from,
+        to,
+        "(uri LIKE 'http://%' OR uri LIKE 'https://%')",
+        {},
+        cfg.threshold ?? 1,
+      ),
+  },
+  {
+    id: "malformedRequests",
+    title: "Malformed / wrong-protocol requests",
+    description:
+      "Bursts of 400, 444, 494 or 497 responses: garbage request lines, oversized headers, or plain HTTP sent to the HTTPS port. Typical of port scanners and protocol fuzzers.",
+    defaults: { enabled: true, severity: "medium", threshold: 10 },
+    editable: { threshold: true, patterns: false },
+    run: (db, from, to, cfg) =>
+      byClient(
+        db,
+        from,
+        to,
+        "status IN (400, 444, 494, 497)",
+        {},
+        cfg.threshold ?? 10,
+      ),
+  },
+  {
+    id: "loginFlood",
+    title: "Login flood",
+    description:
+      "Many POSTs to login endpoints from one client. Complements auth brute force for apps that answer a failed login with 200 rather than 401/403.",
+    defaults: {
+      enabled: true,
+      severity: "high",
+      threshold: 20,
+      patterns: [
+        "%/login%",
+        "%/signin%",
+        "%/sign_in%",
+        "%/sign-in%",
+        "%/api/auth%",
+        "%/j_security_check%",
+        "%/wp-login%",
+      ],
+    },
+    editable: { threshold: true, patterns: true },
+    run: (db, from, to, cfg) => {
+      const like = likeAny("uri", cfg.patterns ?? []);
+      return byClient(
+        db,
+        from,
+        to,
+        `method = 'POST' AND ${like.sql}`,
+        like.params,
+        cfg.threshold ?? 20,
+      );
+    },
   },
   {
     id: "error5xxSurge",
